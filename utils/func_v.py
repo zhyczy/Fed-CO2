@@ -42,3 +42,10 @@ def definite_version(version):
 
     elif version == 10:
         print("Version10: V9 plus generalize both on features and adapted features based on Residual Adaptors")
+
+    elif version == 23:
+        print("Version23: Contrast version with Version 15, independent adaptor")
+
+    elif version == 26:
+        print("Version26: Contrast version with Version 15, independent adaptor and deep copy")
+

@@ -1029,3 +1029,233 @@ def train_ada_shabby3(model, p_model, adaptor, data_loader, optimizer, p_optimiz
 
     return loss_all / len(data_loader), correct/total
 
+
+def train_ada_shabby_kl(model, p_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    clinet_num = len(Specific_heads.keys())
+    assert clinet_num != 0
+    l_lambda = 1/(clinet_num-1)
+    model.train()
+    p_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        for idxx in range(clinet_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                output_gen = Spe_classifier(feature_g)
+                # part2 += l_lambda * loss_g(output_gen, target)
+                part2 += loss_g(output_gen, target)
+        loss = part1 + part2 
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        a_otimizer.zero_grad()
+        adapt_feature = p_model.f_adaptor(feature_g.detach())
+        adapt_classifier = copy.deepcopy(p_model.classifier)
+        adapt_loss = kl_loss(F.log_softmax(adapt_classifier(adapt_feature), dim=1), F.softmax(output_p.detach(), dim=1))
+        adapt_loss.backward()
+        a_otimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+    return loss_all / len(data_loader), correct/total
+
+
+def train_ada_shabby_klcr(model, p_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    clinet_num = len(Specific_heads.keys())
+    assert clinet_num != 0
+    l_lambda = 1/(clinet_num-1)
+    model.train()
+    p_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        for idxx in range(clinet_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                output_gen = Spe_classifier(feature_g)
+                # part2 += l_lambda * loss_g(output_gen, target)
+                part2 += loss_g(output_gen, target)
+        loss = part1 + part2 
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        a_otimizer.zero_grad()
+        adapt_feature = p_model.f_adaptor(feature_g.detach())
+        adapt_classifier = copy.deepcopy(p_model.classifier)
+        adapt_loss = kl_loss(F.log_softmax(adapt_classifier(adapt_feature), dim=1), F.softmax(output_p.detach(), dim=1))
+        adapt_loss += loss_fun(adapt_classifier(adapt_feature), target)
+        adapt_loss.backward()
+        a_otimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+    return loss_all / len(data_loader), correct/total
+
+
+def train_ada_residual_kl(model, p_model, copy_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    clinet_num = len(Specific_heads.keys())
+    assert clinet_num != 0
+    l_lambda = 1/(clinet_num-1)
+    model.train()
+    p_model.train()
+    copy_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        for idxx in range(clinet_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                output_gen = Spe_classifier(feature_g)
+                # part2 += l_lambda * loss_g(output_gen, target)
+                part2 += loss_g(output_gen, target)
+        loss = part1 + part2 
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        for kkk in model.state_dict().keys():
+            if 'adap' not in kkk:
+                if 'num_batches_tracked' not in kkk:
+                    copy_model.state_dict()[kkk].data.copy_(model.state_dict()[kkk])
+
+        a_otimizer.zero_grad()
+        adapt_feature = copy_model.produce_adapt_feature(data)
+        adapt_classifier = copy.deepcopy(p_model.classifier)
+        adapt_loss = kl_loss(F.log_softmax(adapt_classifier(adapt_feature), dim=1), F.softmax(output_p.detach(), dim=1))
+        adapt_loss.backward()
+        a_otimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+    for kkk in copy_model.state_dict().keys():
+        if 'adap' in kkk:
+            model.state_dict()[kkk].data.copy_(copy_model.state_dict()[kkk])
+
+    return loss_all / len(data_loader), correct/total
+
+
+def train_ada_residual_klcr(model, p_model, copy_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    clinet_num = len(Specific_heads.keys())
+    assert clinet_num != 0
+    l_lambda = 1/(clinet_num-1)
+    model.train()
+    p_model.train()
+    copy_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        for idxx in range(clinet_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                output_gen = Spe_classifier(feature_g)
+                # part2 += l_lambda * loss_g(output_gen, target)
+                part2 += loss_g(output_gen, target)
+        loss = part1 + part2 
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        for kkk in model.state_dict().keys():
+            if 'adap' not in kkk:
+                if 'num_batches_tracked' not in kkk:
+                    copy_model.state_dict()[kkk].data.copy_(model.state_dict()[kkk])
+
+        a_otimizer.zero_grad()
+        adapt_feature = copy_model.produce_adapt_feature(data)
+        adapt_classifier = copy.deepcopy(p_model.classifier)
+        adapt_loss = kl_loss(F.log_softmax(adapt_classifier(adapt_feature), dim=1), F.softmax(output_p.detach(), dim=1))
+        adapt_loss += loss_fun(adapt_classifier(adapt_feature), target)
+        adapt_loss.backward()
+        a_otimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+    for kkk in copy_model.state_dict().keys():
+        if 'adap' in kkk:
+            model.state_dict()[kkk].data.copy_(copy_model.state_dict()[kkk])
+
+    return loss_all / len(data_loader), correct/total
+

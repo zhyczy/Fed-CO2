@@ -15,8 +15,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
     proto_dict = {}
     client_weight = {x:[] for x in range(clinet_num)}
     average_proto = 0
-    # if a_iter == 2:
-    #     assert False
+
     if args.mode == 'fedtp':
         hnet.train()
         h_optimizer = optim.SGD(params=hnet.parameters(), lr=args.lr)
@@ -59,6 +58,11 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             for client_idx in range(clinet_num):
                 Specific_adaptor[client_idx] = [copy.deepcopy(models[client_idx].adap3.state_dict()), copy.deepcopy(models[client_idx].adap4.state_dict()), copy.deepcopy(models[client_idx].adap5.state_dict())]
 
+    elif args.mode == 'COPA':
+        Specific_head = {}
+        for client_idx in range(clinet_num):
+            Specific_head[client_idx] = copy.deepcopy(models[client_idx].head)
+
     for client_idx, model in enumerate(models):
         if args.mode.lower() == 'fedprox':
             # skip the first server model(random initialized)
@@ -90,7 +94,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_tt_kll1(model, personalized_models[client_idx], train_loaders[client_idx], test_loaders[client_idx], 
                                         optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, Specific_head, valid_onehot[client_idx], client_idx, device, a_iter)
 
-            elif args.version in [5, 15]:
+            elif args.version in [5, 15, 29, 30, 31]:
                 a_otimizer = optim.SGD(params=personalized_models[client_idx].f_adaptor.parameters(), lr=args.lr, momentum=args.momentum)
                 p_optimizer = optim.SGD(params=[{'params':personalized_models[client_idx].features.parameters()},
                                      {'params':personalized_models[client_idx].classifier.parameters()}], lr=args.lr)
@@ -227,9 +231,6 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_ada_shabby2(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
-            # elif args.version == 29:
-
-
             else:
                 train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], train_loaders[client_idx], test_loaders[client_idx], 
                                         optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, valid_onehot[client_idx], 
@@ -244,6 +245,17 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             p_optimizer = optim.SGD(params=personalized_models[client_idx].parameters(), lr=args.lr)
             criterion_ba = nn.CrossEntropyLoss().to(device)
             train_loss, train_acc = train_rod(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, device)
+
+        elif args.mode == 'AlignFed':
+            if args.version == 1:
+                train_loss, train_acc, proto = AlignFed_train(model, train_loaders[client_idx], optimizers[client_idx], global_prototypes, loss_fun, a_iter, device)
+                proto_dict[client_idx] = proto
+            elif args.version == 2:
+                train_loss, train_acc, proto = AlignFed_train1(model, train_loaders[client_idx], optimizers[client_idx], global_prototypes, loss_fun, a_iter, device)
+                proto_dict[client_idx] = proto
+
+        elif args.mode == 'COPA':
+            train_loss, train_acc = train_COPA(model, Specific_head, train_loaders[client_idx], optimizers[client_idx], loss_fun, client_idx, device)
 
         else:
             train_loss, train_acc = train(model, train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
@@ -455,6 +467,122 @@ def train_prox(args, model, server_model, data_loader, optimizer, loss_fun, devi
     return loss_all / len(data_loader), correct/total
 
 
+def AlignFed_train(model, data_loader, optimizer, global_prototypes, loss_fun, a_iter, device):
+    model.train()
+    if a_iter!=0:
+        client_num = len(list(global_prototypes.keys()))
+        assert client_num != 0
+    loss_all = 0
+    total = 0
+    correct = 0
+    proto = {}
+
+    for data, target in data_loader:
+        optimizer.zero_grad()
+
+        data = data.to(device)
+        target = target.to(device)
+        local_feature = model.produce_feature(data)
+        output = model.head(local_feature)
+        loss = loss_fun(output, target)
+
+        if a_iter != 0:
+            align_loss = 0
+            for dix in range(data.shape[0]):
+                lab = int(target[dix])
+                pc_proto = global_prototypes[lab]
+                pos = torch.cosine_similarity(local_feature[dix].view(1, -1), pc_proto)
+                neg = 0
+                for cix in range(client_num):
+                    neg += torch.cosine_similarity(local_feature[dix].view(1, -1), global_prototypes[cix])
+                ins_loss = -torch.log(pos/neg)
+                align_loss += ins_loss
+            loss += align_loss[0]
+
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss.backward()
+        optimizer.step()
+
+    class_id = {idd:[torch.zeros(1,4096).to(device), 0] for idd in range(10)}
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature = model.produce_feature(data)
+        for ins in range(len(target)):
+            c_id = int(target[ins])
+            class_id[c_id][0] += feature[ins].view(1,-1).detach()
+            class_id[c_id][1] += 1 
+
+    class_prototype = 0
+    for cc in range(len(class_id.keys())):
+        class_prototype = class_id[cc][0]/class_id[cc][1]
+        proto[cc] = class_prototype
+
+    return loss_all / len(data_loader), correct/total, proto
+
+
+def AlignFed_train1(model, data_loader, optimizer, global_prototypes, loss_fun, a_iter, device):
+    model.train()
+    if a_iter!=0:
+        client_num = len(list(global_prototypes.keys()))
+        assert client_num != 0
+    loss_all = 0
+    total = 0
+    correct = 0
+    proto = {}
+
+    for data, target in data_loader:
+        optimizer.zero_grad()
+
+        data = data.to(device)
+        target = target.to(device)
+        local_feature = model.produce_feature(data)
+        output = model.head(local_feature)
+        loss = loss_fun(output, target)
+
+        if a_iter >= 100:
+            align_loss = 0
+            for dix in range(data.shape[0]):
+                lab = int(target[dix])
+                pc_proto = global_prototypes[lab]
+                pos = torch.cosine_similarity(local_feature[dix].view(1, -1), pc_proto)
+                neg = 0
+                for cix in range(client_num):
+                    neg += torch.cosine_similarity(local_feature[dix].view(1, -1), global_prototypes[cix])
+                ins_loss = -torch.log(pos/neg)
+                align_loss += ins_loss
+            loss += align_loss[0]
+
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss.backward()
+        optimizer.step()
+
+    class_id = {idd:[torch.zeros(1,4096).to(device), 0] for idd in range(10)}
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature = model.produce_feature(data)
+        for ins in range(len(target)):
+            c_id = int(target[ins])
+            class_id[c_id][0] += feature[ins].view(1,-1).detach()
+            class_id[c_id][1] += 1 
+
+    class_prototype = 0
+    for cc in range(len(class_id.keys())):
+        class_prototype = class_id[cc][0]/class_id[cc][1]
+        proto[cc] = class_prototype
+
+    return loss_all / len(data_loader), correct/total, proto
+
+
 def train_tt_kll1(model, p_model, data_loader, unlabeled_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, onehot_value, client_idx, device, a_iter):
     kl_loss = nn.KLDivLoss(reduction='batchmean')
     clinet_num = len(Specific_heads.keys())
@@ -581,107 +709,37 @@ def train_ada_shabby(model, p_model, data_loader, optimizer, p_optimizer, a_otim
     return loss_all / len(data_loader), correct/total
 
 
-def train_ada_shabby_kl(model, p_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
-    kl_loss = nn.KLDivLoss(reduction='batchmean')
+def train_COPA(model, Specific_heads, data_loader, optimizer, loss_fun, client_idx, device):
     clinet_num = len(Specific_heads.keys())
     assert clinet_num != 0
-    l_lambda = 1/(clinet_num-1)
     model.train()
-    p_model.train()
     loss_all = 0
     total = 0
     correct = 0
     for data, target in data_loader:
+        optimizer.zero_grad()
+
         data = data.to(device)
         target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.classifier(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
+        local_feature = model.produce_feature(data)
+        output = model.head(local_feature)
+        part1 = loss_fun(output, target)
 
         part2 = 0
         for idxx in range(clinet_num):
             if idxx != client_idx:
                 Spe_classifier = Specific_heads[idxx]
-                output_gen = Spe_classifier(feature_g)
-                # part2 += l_lambda * loss_g(output_gen, target)
-                part2 += loss_g(output_gen, target)
-        loss = part1 + part2 
-        loss.backward()
-        optimizer.step()
+                output_gen = Spe_classifier(local_feature)
+                part2 += loss_fun(output_gen, target)
+        loss = part1 + part2
 
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        a_otimizer.zero_grad()
-        adapt_feature = p_model.f_adaptor(feature_g.detach())
-        adapt_classifier = copy.deepcopy(p_model.classifier)
-        adapt_loss = kl_loss(F.log_softmax(adapt_classifier(adapt_feature), dim=1), F.softmax(output_p.detach(), dim=1))
-        adapt_loss.backward()
-        a_otimizer.step()
-
-        loss_all += loss_p.item()
+        loss_all += loss.item()
         total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
+        pred = output.data.max(1)[1]
         correct += pred.eq(target.view(-1)).sum().item()
 
-    return loss_all / len(data_loader), correct/total
-
-
-def train_ada_shabby_klcr(model, p_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
-    kl_loss = nn.KLDivLoss(reduction='batchmean')
-    clinet_num = len(Specific_heads.keys())
-    assert clinet_num != 0
-    l_lambda = 1/(clinet_num-1)
-    model.train()
-    p_model.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.classifier(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
-
-        part2 = 0
-        for idxx in range(clinet_num):
-            if idxx != client_idx:
-                Spe_classifier = Specific_heads[idxx]
-                output_gen = Spe_classifier(feature_g)
-                # part2 += l_lambda * loss_g(output_gen, target)
-                part2 += loss_g(output_gen, target)
-        loss = part1 + part2 
         loss.backward()
         optimizer.step()
-
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        a_otimizer.zero_grad()
-        adapt_feature = p_model.f_adaptor(feature_g.detach())
-        adapt_classifier = copy.deepcopy(p_model.classifier)
-        adapt_loss = kl_loss(F.log_softmax(adapt_classifier(adapt_feature), dim=1), F.softmax(output_p.detach(), dim=1))
-        adapt_loss += loss_fun(adapt_classifier(adapt_feature), target)
-        adapt_loss.backward()
-        a_otimizer.step()
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
 
     return loss_all / len(data_loader), correct/total
 
@@ -732,131 +790,6 @@ def train_ada_residual(model, p_model, copy_model, data_loader, optimizer, p_opt
         adapt_feature = copy_model.produce_adapt_feature(data)
         adapt_classifier = copy.deepcopy(p_model.classifier)
         adapt_loss = loss_fun(adapt_classifier(adapt_feature), target)
-        adapt_loss.backward()
-        a_otimizer.step()
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-    for kkk in copy_model.state_dict().keys():
-        if 'adap' in kkk:
-            model.state_dict()[kkk].data.copy_(copy_model.state_dict()[kkk])
-
-    return loss_all / len(data_loader), correct/total
-
-
-def train_ada_residual_kl(model, p_model, copy_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
-    kl_loss = nn.KLDivLoss(reduction='batchmean')
-    clinet_num = len(Specific_heads.keys())
-    assert clinet_num != 0
-    l_lambda = 1/(clinet_num-1)
-    model.train()
-    p_model.train()
-    copy_model.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.classifier(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
-
-        part2 = 0
-        for idxx in range(clinet_num):
-            if idxx != client_idx:
-                Spe_classifier = Specific_heads[idxx]
-                output_gen = Spe_classifier(feature_g)
-                # part2 += l_lambda * loss_g(output_gen, target)
-                part2 += loss_g(output_gen, target)
-        loss = part1 + part2 
-        loss.backward()
-        optimizer.step()
-
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        for kkk in model.state_dict().keys():
-            if 'adap' not in kkk:
-                if 'num_batches_tracked' not in kkk:
-                    copy_model.state_dict()[kkk].data.copy_(model.state_dict()[kkk])
-
-        a_otimizer.zero_grad()
-        adapt_feature = copy_model.produce_adapt_feature(data)
-        adapt_classifier = copy.deepcopy(p_model.classifier)
-        adapt_loss = kl_loss(F.log_softmax(adapt_classifier(adapt_feature), dim=1), F.softmax(output_p.detach(), dim=1))
-        adapt_loss.backward()
-        a_otimizer.step()
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-    for kkk in copy_model.state_dict().keys():
-        if 'adap' in kkk:
-            model.state_dict()[kkk].data.copy_(copy_model.state_dict()[kkk])
-
-    return loss_all / len(data_loader), correct/total
-
-
-def train_ada_residual_klcr(model, p_model, copy_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
-    kl_loss = nn.KLDivLoss(reduction='batchmean')
-    clinet_num = len(Specific_heads.keys())
-    assert clinet_num != 0
-    l_lambda = 1/(clinet_num-1)
-    model.train()
-    p_model.train()
-    copy_model.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.classifier(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
-
-        part2 = 0
-        for idxx in range(clinet_num):
-            if idxx != client_idx:
-                Spe_classifier = Specific_heads[idxx]
-                output_gen = Spe_classifier(feature_g)
-                # part2 += l_lambda * loss_g(output_gen, target)
-                part2 += loss_g(output_gen, target)
-        loss = part1 + part2 
-        loss.backward()
-        optimizer.step()
-
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        for kkk in model.state_dict().keys():
-            if 'adap' not in kkk:
-                if 'num_batches_tracked' not in kkk:
-                    copy_model.state_dict()[kkk].data.copy_(model.state_dict()[kkk])
-
-        a_otimizer.zero_grad()
-        adapt_feature = copy_model.produce_adapt_feature(data)
-        adapt_classifier = copy.deepcopy(p_model.classifier)
-        adapt_loss = kl_loss(F.log_softmax(adapt_classifier(adapt_feature), dim=1), F.softmax(output_p.detach(), dim=1))
-        adapt_loss += loss_fun(adapt_classifier(adapt_feature), target)
         adapt_loss.backward()
         a_otimizer.step()
 
