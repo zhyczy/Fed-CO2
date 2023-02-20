@@ -12,9 +12,9 @@ import torch.optim as optim
 import pickle as pkl
 from utils.data_utils import DomainNetDataset, prepare_data
 from utils.methods import local_training
-from utils.utils import  communication, test, set_client_weight, visualize, log_write_dictionary, show_dictionary
+from utils.utils import  communication, test, set_client_weight, visualize, log_write_dictionary, show_dictionary, visualize_combination
 from utils.func_v import definite_version
-from nets.models import AlexNet, AlexNet_rod, AlexNet_peer, P_Head, AlexNet_ada, AlexNet_adaG, AlexNet_adaP, AlexNet_adapt, AlexNet_adaptP
+from nets.models import AlexNet, AlexNet_rod, AlexNet_peer, P_Head, AlexNet_ada, AlexNet_adaG, AlexNet_adaP, AlexNet_adapt, AlexNet_adaptP, AlexNet_adaptP_trial
 from nets.vit import ViT, ViTHyper
 import argparse
 import time
@@ -86,7 +86,8 @@ if __name__ == '__main__':
         server_model = ViT(image_size = 256, patch_size = 16, num_classes = 10, dim = 768, depth = 6, heads = 8, mlp_dim = 3072,
                   dropout = 0.1, emb_dropout = 0.1).to(device)
     elif args.mode == 'peer':
-        if args.version in [18, 25, 28, 46, 47, 48, 49, 50, 1, 2, 5, 15, 23, 24, 26, 29, 7, 8, 11, 12, 19, 20, 27, 30, 31]:
+        if args.version in [18, 25, 58, 62, 28, 46, 47, 48, 49, 50, 1, 2, 5, 15, 23, 24, 26, 29, 7, 8, 11, 12, 19, 20, 27, 30, 31, 32, 
+                            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 59, 60, 61, 63, 64]:
             server_model = AlexNet().to(device)
         elif args.version in [3, 4, 6, 16, 9, 10, 13, 14, 21, 22]:
             server_model = AlexNet_adaG().to(device)
@@ -136,7 +137,6 @@ if __name__ == '__main__':
     
 
     if args.mode == 'peer':
-        # paggregation_models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
         if args.version == 17:
             print("Version17: Train two models seperately")
 
@@ -149,53 +149,29 @@ if __name__ == '__main__':
         elif args.version == 28:
             print("Version28: Version18 + generalized heads are pretrained")
 
-        elif args.version == 50:
-            print("Version50: logits level distillation for Version48")
+        elif args.version == 52:
+            print("Version52: P head is personalized")
 
-        elif args.version == 5:
-            print("Version5: Updated Version2")
+        elif args.version == 58:
+            print("Version58: V18 and show generalized branch details")
 
-        elif args.version == 6:
-            print("Version6: Updated Version4")
+        elif args.version == 59:
+            print("Version59: upper bound, use accuracy in test set as weights")
 
-        elif args.version == 11:
-            print("Version11: KL version of V5")
+        elif args.version == 60:
+            print("Version60: approximation version for version59 with validation set")
 
-        elif args.version == 12:
-            print("Version12: KL and CR for V5")
+        elif args.version == 61:
+            print("Version61: comparison version with V59 with no generalized branch")
 
-        elif args.version == 13:
-            print("Version13: KL version of V6")
+        elif args.version == 62:
+            print("Check BN in version18, it seems we need to set spe_classifier eval() to keep the running mean and running var right")
 
-        elif args.version == 14:
-            print("Version14: KL and CR for V6")
+        elif args.version == 63:
+            print("Version63: quick experiment, G branch now is based on FedBN")
 
-        elif args.version == 19:
-            print("Version19: V7 + V5, Shabby Adaptors")
-
-        elif args.version == 20:
-            print("Version20: V7 plus + V5, Shabby Adaptors")
-
-        elif args.version == 21:
-            print("Version21: V9 + V6, Residual Adaptors")
-
-        elif args.version == 22:
-            print("Version22: V9 plus + V6, Residual Adaptors")
-
-        elif args.version == 24:
-            print("Version24: Contrast version with Version 15, deep personal classifier copy")
-
-        elif args.version == 27:
-            print("Version27: Find upper bound for new V5-V26")
-
-        elif args.version == 29:
-            print("Version29: Contrast version with Version 5, deep copy in test function")
-
-        elif args.version == 30:
-            print("Version30: Other Feature extractors adapt to this domain")
-
-        elif args.version == 31:
-            print("Version31: Add bias for Shabby Adaptor")
+        elif args.version == 64:
+            print("Version64: comparison version with V63 with no generalized branch")
 
         else:
             definite_version(args.version)
@@ -203,8 +179,32 @@ if __name__ == '__main__':
 
         if args.version == 31:
             personalized_models = [AlexNet_adaptP().to(device) for idx in range(client_num)]
-        elif args.version in [28]:
+        elif args.version == 43:
+            personalized_models = [AlexNet_adaptP_trial().to(device) for idx in range(client_num)]
+        elif args.version == 55:
+            extra_modules = { idx: nn.Linear(4096, 10).to(device) for idx in range(client_num)}
+            RESULTS_PATH = os.path.join(args.save_path, '{}'.format('local'))
+            savepoint = torch.load(RESULTS_PATH)
+            ccc_model = AlexNet().to(device)
+            for client_idx in range(client_num):
+                ccc_model.load_state_dict(savepoint['model_{}'.format(client_idx)])
+                extra_modules[client_idx].load_state_dict(ccc_model.state_dict(), strict=False)
+            personalized_models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
+        elif args.version in [56, 57, 59, 60, 61]:
+            paggregation_models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
+            personalized_models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
+        elif args.version == 28:
             extra_modules = { idx: P_Head().to(device) for idx in range(client_num)}
+            RESULTS_PATH = os.path.join(args.save_path, '{}'.format('local'))
+            savepoint = torch.load(RESULTS_PATH)
+            ccc_model = AlexNet().to(device)
+            for client_idx in range(client_num):
+                ccc_model.load_state_dict(savepoint['model_{}'.format(client_idx)])
+                extra_modules[client_idx].load_state_dict(ccc_model.state_dict(), strict=False)
+            personalized_models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
+        elif args.version in [35 ,37]:
+            extra_unit = copy.deepcopy(server_model.classifier)
+            extra_modules = { idx: copy.deepcopy(extra_unit) for idx in range(client_num)}
             RESULTS_PATH = os.path.join(args.save_path, '{}'.format('local'))
             savepoint = torch.load(RESULTS_PATH)
             ccc_model = AlexNet().to(device)
@@ -219,7 +219,7 @@ if __name__ == '__main__':
             personalized_models = [AlexNet_ada().to(device) for idx in range(client_num)]
         elif args.version in [3, 4]:
             personalized_models = [AlexNet_adaP().to(device) for idx in range(client_num)]
-        elif args.version in [5, 15, 24, 29, 7, 8, 11, 12, 19, 20, 30]:
+        elif args.version in [5, 15, 24, 29, 7, 8, 11, 12, 19, 20, 30, 40, 41, 42]:
             personalized_models = [AlexNet_adapt().to(device) for idx in range(client_num)]
         elif args.version in [6, 16, 9, 10, 13, 14, 21, 22]:
             personalized_models = [AlexNet().to(device) for idx in range(client_num)]
@@ -274,13 +274,13 @@ if __name__ == '__main__':
                 else:
                     p_model = None
                 _, test_acc = test(test_idx, models[test_idx], p_model, extra_modules, test_loader, loss_fun, device, args, hnet, global_prototype)
-                # if args.version in [18]:
-                #     print(' {:<11s}'.format(datasets[test_idx]))
-                #     visualize(test_idx, models[test_idx], p_model, extra_modules, train_loaders[test_idx], loss_fun, device, args, hnet, global_prototype)
+                if args.version in [18]:
+                    print(' {:<11s}'.format(datasets[test_idx]))
+                    # visualize_d(test_idx, models[test_idx], p_model, extra_modules, train_loaders[test_idx], loss_fun, device, args, hnet, global_prototype)
+                    # visualize(test_idx, models[test_idx], p_model, extra_modules, train_loaders[test_idx], loss_fun, device, args, hnet, global_prototype)
+                    visualize_combination(test_idx, models[test_idx], personalized_models, test_loaders[test_idx], loss_fun, device, args)
                 if args.mode == 'peer':
                     print(' {:<11s}| Test  Acc: {:.4f} | G  Acc: {:.4f} | P  Acc: {:.4f}'.format(datasets[test_idx], test_acc[0], test_acc[1], test_acc[2]))
-                    # if args.version in [43]:
-                    #     print(' {:<11s}| Test  Acc: {:.4f} | G  Acc: {:.4f} | P  Acc: {:.4f} | M Acc: {:.4f}'.format(datasets[test_idx], test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
                 else:
                     print(' {:<11s}| Test  Acc: {:.4f}'.format(datasets[test_idx], test_acc))
         
@@ -313,19 +313,26 @@ if __name__ == '__main__':
             if args.log:
                 logfile.write("============ Train epoch {} ============\n".format(wi + a_iter * args.wk_iters)) 
 
-            train_loss, train_acc, proto_dict, weight_dict = local_training(models, personalized_models, paggregation_models, hnet, server_model, global_prototypes, extra_modules, 
-                                                               valid_onehot, weight_dict, args, train_loaders, test_loaders, optimizers, loss_fun, device, a_iter=a_iter)  
+            if args.version == 60:
+                train_loss, train_acc, proto_dict, weight_dict = local_training(models, personalized_models, paggregation_models, hnet, server_model, global_prototypes, extra_modules, 
+                                                               valid_onehot, weight_dict, args, train_loaders, val_loaders, optimizers, loss_fun, device, a_iter=a_iter)  
+            else:
+                train_loss, train_acc, proto_dict, weight_dict = local_training(models, personalized_models, paggregation_models, hnet, server_model, global_prototypes, extra_modules, 
+                                                               valid_onehot, weight_dict, args, train_loaders, test_loaders, optimizers, loss_fun, device, a_iter=a_iter)
         
         with torch.no_grad():
             # Aggregation
             if len(weight_dict[0]) != 0:
+                assert args.version in [59, 60, 61]
                 server_model, models, global_prototypes = communication(args, server_model, models, personalized_models, extra_modules, paggregation_models, weight_dict, proto_dict, a_iter)
             else:
                 server_model, models, global_prototypes = communication(args, server_model, models, personalized_models, extra_modules, paggregation_models, client_weights, proto_dict, a_iter)
 
             if args.mode == 'peer':
                 for client_idx, model in enumerate(models):
-                    if args.version in [5, 11, 12, 19, 20 ,29, 31]:
+                    if args.version == 58:
+                        extra_modules.append(copy.deepcopy(personalized_models[client_idx].classifier))
+                    elif args.version in [5, 11, 12, 19, 20 ,29, 31]:
                         extra_modules.append([copy.deepcopy(personalized_models[client_idx].f_adaptor), copy.deepcopy(personalized_models[client_idx].classifier)])
                     elif args.version in [6, 13, 14, 21, 22]:
                         extra_modules.append([copy.deepcopy(models[client_idx].adap3.state_dict()), copy.deepcopy(models[client_idx].adap4.state_dict()), copy.deepcopy(models[client_idx].adap5.state_dict()), copy.deepcopy(personalized_models[client_idx].classifier)])
@@ -355,13 +362,17 @@ if __name__ == '__main__':
                         print(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_acc[0], train_acc[1], train_acc[2]))
                         show_dictionary(logfile, train_loss[3], a_iter, mode='Loss', data='domainnet', division='Train')
                         show_dictionary(logfile, train_acc[3], a_iter, mode='Acc', data='domainnet', division='Train')
+                    elif args.version == 58:
+                        print(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Gen Sum Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | Gen Sum Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_acc[0], train_acc[1], train_acc[2], train_acc[3]))
+                        show_dictionary(logfile, train_loss[4], a_iter, mode='Loss', data='domainnet', division='Train')
+                        show_dictionary(logfile, train_acc[4], a_iter, mode='Acc', data='domainnet', division='Train')
                     elif args.version in [1, 2, 3, 4]:
                         print(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | P_adapt Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f} | P_adapt Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_acc[0], train_acc[1], train_acc[2], train_acc[3], train_acc[4]))
                     elif args.version in [5, 29, 6, 11, 12, 13, 14, 19, 20, 21, 22, 30, 31]:
                         print(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_acc[0], train_acc[1], train_acc[2], train_acc[3]))
                         show_dictionary(logfile, train_loss[4], a_iter, mode='Loss', data='domainnet', division='Train')
                         show_dictionary(logfile, train_acc[4], a_iter, mode='Acc', data='domainnet', division='Train')
-                    elif args.version in [15, 16, 23, 24, 26]:
+                    elif args.version in [15, 16, 23, 24, 26, 40, 41, 42, 43]:
                         print(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_acc[0], train_acc[1], train_acc[2], train_acc[3]))
                     else:
                         print(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_acc[0], train_acc[1], train_acc[2]))
@@ -373,13 +384,17 @@ if __name__ == '__main__':
                             logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_acc[0], train_acc[1], train_acc[2]))
                             log_write_dictionary(logfile, train_loss[3], mode='Loss', data='domainnet', division='Train')
                             log_write_dictionary(logfile, train_acc[3], mode='Acc', data='domainnet', division='Train')
+                        elif args.version == 58:
+                            logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Gen Sum Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | Gen Sum Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_acc[0], train_acc[1], train_acc[2], train_acc[3]))
+                            log_write_dictionary(logfile, train_loss[4], mode='Loss', data='domainnet', division='Train')
+                            log_write_dictionary(logfile, train_acc[4], mode='Acc', data='domainnet', division='Train')
                         elif args.version in [1, 2, 3, 4]:
                             logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | P_adapt Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f} | P_adapt Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_loss[4], train_acc[0], train_acc[1], train_acc[2], train_acc[3], train_acc[4]))
                         elif args.version in [5, 29, 6, 11, 12, 13, 14, 19, 20, 21, 22, 30, 31]:
                             logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_acc[0], train_acc[1], train_acc[2], train_acc[3]))
                             log_write_dictionary(logfile, train_loss[4], mode='Loss', data='domainnet', division='Train')
                             log_write_dictionary(logfile, train_acc[4], mode='Acc', data='domainnet', division='Train')
-                        elif args.version in [15, 16, 23, 24, 26]:
+                        elif args.version in [15, 16, 23, 24, 26, 40, 41, 42, 43]:
                             logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_loss[3], train_acc[0], train_acc[1], train_acc[2], train_acc[3]))
                         else:
                             logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_acc[0], train_acc[1], train_acc[2]))
@@ -403,13 +418,17 @@ if __name__ == '__main__':
                         print(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_acc[0], val_acc[1], val_acc[2]))
                         show_dictionary(logfile, val_loss[3], a_iter, mode='Loss', data='domainnet', division='Val')
                         show_dictionary(logfile, val_acc[3], a_iter, mode='Acc', data='domainnet', division='Val')
+                    elif args.version == 58:
+                        print(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Gen Sum Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | Gen Sum Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_loss[3], val_acc[0], val_acc[1], val_acc[2], val_acc[3]))
+                        show_dictionary(logfile, val_loss[4], a_iter, mode='Loss', data='domainnet', division='Val')
+                        show_dictionary(logfile, val_acc[4], a_iter, mode='Acc', data='domainnet', division='Val')
                     elif args.version in [1, 2, 3, 4]:
                         print(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | P_adapt Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f} | P_adapt Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_loss[3], val_loss[4], val_acc[0], val_acc[1], val_acc[2], val_acc[3], val_acc[4]))
                     elif args.version in [5, 29, 6, 11, 12, 13, 14, 19, 20, 21, 22, 30, 31]:
                         print(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_loss[3], val_acc[0], val_acc[1], val_acc[2], val_acc[3]))
                         show_dictionary(logfile, val_loss[4], a_iter, mode='Loss', data='domainnet', division='Val')
                         show_dictionary(logfile, val_acc[4], a_iter, mode='Acc', data='domainnet', division='Val')
-                    elif args.version in [15, 16, 23, 24, 26]:
+                    elif args.version in [15, 16, 23, 24, 26, 40, 41, 42, 43]:
                         print(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_loss[3], val_acc[0], val_acc[1], val_acc[2], val_acc[3]))
                     else:
                         print(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_acc[0], val_acc[1], val_acc[2]))
@@ -427,13 +446,17 @@ if __name__ == '__main__':
                             logfile.write(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_acc[0], val_acc[1], val_acc[2]))
                             log_write_dictionary(logfile, val_loss[3], mode='Loss', data='domainnet', division='Val')
                             log_write_dictionary(logfile, val_acc[3], mode='Acc', data='domainnet', division='Val')
+                        elif args.version == 58:
+                            logfile.write(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Gen Sum Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | Gen Sum Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_loss[3], val_acc[0], val_acc[1], val_acc[2], val_acc[3]))
+                            log_write_dictionary(logfile, val_loss[4], mode='Loss', data='domainnet', division='Val')
+                            log_write_dictionary(logfile, val_acc[4], mode='Acc', data='domainnet', division='Val')
                         elif args.version in [1, 2, 3, 4]:
                             logfile.write(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | P_adapt Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f} | P_adapt Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_loss[3], val_loss[4], val_acc[0], val_acc[1], val_acc[2], val_acc[3], val_acc[4]))
                         elif args.version in [5, 29, 6, 11, 12, 13, 14, 19, 20, 21, 22, 30, 31]:
                             logfile.write(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_loss[3], val_acc[0], val_acc[1], val_acc[2], val_acc[3]))
                             log_write_dictionary(logfile, val_loss[4], mode='Loss', data='domainnet', division='Val')
                             log_write_dictionary(logfile, val_acc[4], mode='Acc', data='domainnet', division='Val')
-                        elif args.version in [15, 16, 23, 24, 26]:
+                        elif args.version in [15, 16, 23, 24, 26, 40, 41, 42, 43]:
                             logfile.write(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | G_adapt Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_loss[3], val_acc[0], val_acc[1], val_acc[2], val_acc[3]))
                         else:
                             logfile.write(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_acc[0], val_acc[1], val_acc[2]))
@@ -443,7 +466,7 @@ if __name__ == '__main__':
                     else:
                         logfile.write(' Site-{:<10s}| Val  Loss: {:.4f} | Val  Acc: {:.4f}\n'.format(datasets[client_idx], val_loss, val_acc))
 
-            if args.mode == 'peer' and args.version in [46, 47, 48, 49, 50]:
+            if args.mode == 'peer' and args.version in [46, 47, 48, 49, 50, 34, 35]:
                 print(valid_onehot)
 
             # Record best
@@ -554,12 +577,15 @@ if __name__ == '__main__':
                             if args.version == 27:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
                                 show_dictionary(logfile, test_acc[3], a_iter, mode='Acc', data='domainnet', division='Test')
+                            elif args.version == 58:
+                                print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | Gen Sum Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
+                                show_dictionary(logfile, test_acc[4], a_iter, mode='Acc', data='domainnet', division='Test')
                             elif args.version in [1, 2, 3, 4]:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f} | P_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3], test_acc[4]))
                             elif args.version in [5, 29, 6, 11, 12, 13, 14, 19, 20, 21, 22, 30, 31]:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
                                 show_dictionary(logfile, test_acc[4], a_iter, mode='Acc', data='domainnet', division='Test')
-                            elif args.version in [15, 16, 23, 24, 26]:
+                            elif args.version in [15, 16, 23, 24, 26, 40, 41, 42, 43]:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
                             else:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
@@ -570,12 +596,15 @@ if __name__ == '__main__':
                                 if args.version == 27:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
                                     log_write_dictionary(logfile, test_acc[3], mode='Acc', data='domainnet', division='Test')
+                                elif args.version == 58:
+                                    logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | Gen Sum Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
+                                    log_write_dictionary(logfile, test_acc[4], mode='Acc', data='domainnet', division='Test')
                                 elif args.version in [1, 2, 3, 4]:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f} | P_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3], test_acc[4]))
                                 elif args.version in [5, 29, 6, 11, 12, 13, 14, 19, 20, 21, 22, 30, 31]:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
                                     log_write_dictionary(logfile, test_acc[4], mode='Acc', data='domainnet', division='Test')
-                                elif args.version in [15, 16, 23, 24, 26]:
+                                elif args.version in [15, 16, 23, 24, 26, 40, 41, 42, 43]:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
                                 else:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
@@ -628,12 +657,15 @@ if __name__ == '__main__':
                             if args.version == 27:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
                                 show_dictionary(logfile, test_acc[3], a_iter, mode='Acc', data='domainnet', division='Test')
+                            elif args.version == 58:
+                                print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | Gen Sum Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
+                                show_dictionary(logfile, test_acc[4], a_iter, mode='Acc', data='domainnet', division='Test')
                             elif args.version in [1, 2, 3, 4]:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f} | P_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3], test_acc[4]))
                             elif args.version in [5, 29, 6, 11, 12, 13, 14, 19, 20, 21, 22, 30, 31]:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
                                 show_dictionary(logfile, test_acc[4], a_iter, mode='Acc', data='domainnet', division='Test')
-                            elif args.version in [15, 16, 23, 24, 26]:
+                            elif args.version in [15, 16, 23, 24, 26, 40, 41, 42, 43]:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
                             else:
                                 print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
@@ -644,12 +676,15 @@ if __name__ == '__main__':
                                 if args.version == 27:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
                                     log_write_dictionary(logfile, test_acc[3], mode='Acc', data='domainnet', division='Test')
+                                elif args.version == 58:
+                                    logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | Gen Sum Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
+                                    log_write_dictionary(logfile, test_acc[4], mode='Acc', data='domainnet', division='Test')
                                 elif args.version in [1, 2, 3, 4]:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f} | P_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3], test_acc[4]))
                                 elif args.version in [5, 29, 6, 11, 12, 13, 14, 19, 20, 21, 22, 30, 31]:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
                                     log_write_dictionary(logfile, test_acc[4], mode='Acc', data='domainnet', division='Test')
-                                elif args.version in [15, 16, 23, 24, 26]:
+                                elif args.version in [15, 16, 23, 24, 26, 40, 41, 42, 43]:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f} | G_adapt Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2], test_acc[3]))
                                 else:
                                     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
@@ -668,11 +703,120 @@ if __name__ == '__main__':
                         if args.log:
                             logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}\n'.format(datasite, best_epoch, test_acc))
             
-            if args.version in [5, 29, 11, 12, 19, 20, 6, 13, 14, 21, 22, 31]:
+            if args.version in [5, 29, 11, 12, 19, 20, 6, 13, 14, 21, 22, 31, 58]:
                 extra_modules = []
 
         if log:
             logfile.flush()
+    
+    best_epoch = 0
+    best_acc = [0. for j in range(client_num)]
+
+    # Start finetuning
+    if args.mode == 'peer':
+        if args.version in [32, 33]:
+            for a_iter in range(start_iter, args.iters):
+                optimizers = [optim.SGD(params=models[idx].parameters(), lr=args.lr, momentum=args.momentum) for idx in range(client_num)]
+                for wi in range(args.wk_iters):
+                    print("============ Finetuning epoch {} ============".format(wi + a_iter * args.wk_iters))
+                    if args.log:
+                        logfile.write("============ Finetuning epoch {} ============\n".format(wi + a_iter * args.wk_iters)) 
+
+                    train_loss, train_acc, proto_dict, weight_dict = local_training(models, personalized_models, paggregation_models, hnet, server_model, global_prototypes, extra_modules, 
+                                                                       valid_onehot, weight_dict, args, None, test_loaders, optimizers, loss_fun, device, a_iter=a_iter, phase='Finetune')
+
+                with torch.no_grad():
+                    # Aggregation
+                    if args.version == 32:
+                        server_model, models, global_prototypes = communication(args, server_model, models, personalized_models, extra_modules, paggregation_models, client_weights, proto_dict, a_iter)
+
+                    # Report loss after aggregation
+                    for client_idx, model in enumerate(models):
+                        p_model = personalized_models[client_idx]
+             
+                        train_loss, train_acc = test(client_idx, model, p_model, extra_modules, train_loaders[client_idx], loss_fun, device, args, hnet, global_prototype, flog=True)
+                        print(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_acc[0], train_acc[1], train_acc[2]))
+                        if args.log:
+                            logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_acc[0], train_acc[1], train_acc[2]))
+                           
+                    # Validation
+                    val_acc_list = [None for j in range(client_num)]
+                    for client_idx, model in enumerate(models):
+                        p_model = personalized_models[client_idx]
+                        
+                        val_loss, val_acc = test(client_idx, model, p_model, extra_modules, val_loaders[client_idx], loss_fun, device, args, hnet, global_prototype)
+                        val_acc_list[client_idx] = val_acc[0]
+                        print(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_acc[0], val_acc[1], val_acc[2]))
+                        
+                        if args.log:
+                            #G acc is higher than P acc
+                            if val_acc[1] > val_acc[2]:
+                                valid_onehot[client_idx] = 1
+                            else:
+                                valid_onehot[client_idx] = 0
+                            logfile.write(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_acc[0], val_acc[1], val_acc[2]))
+                                
+                         
+                    if args.version in [32, 33]:
+                        print(valid_onehot)
+
+                    # Record best
+                    if np.mean(val_acc_list) > np.mean(best_acc):
+                        for client_idx in range(client_num):
+                            best_acc[client_idx] = val_acc_list[client_idx]
+                            best_epoch = a_iter
+                            best_changed=True
+                            print(' Best site-{:<10s}| Epoch:{} | Val Acc: {:.4f}'.format(datasets[client_idx], best_epoch, best_acc[client_idx]))
+                            if args.log:
+                                logfile.write(' Best site-{:<10s} | Epoch:{} | Val Acc: {:.4f}\n'.format(datasets[client_idx], best_epoch, best_acc[client_idx]))
+                
+                    if best_changed:     
+                        print(' Saving the local and server checkpoint to {}...'.format(SAVE_PATH))
+                        logfile.write(' Saving the local and server checkpoint to {}...\n'.format(SAVE_PATH))
+                        if args.dataset == 'domainnet':
+                            torch.save({
+                                'server_model': server_model.state_dict(),
+                                'model_0': personalized_models[0].state_dict(),
+                                'model_1': personalized_models[1].state_dict(),
+                                'model_2': personalized_models[2].state_dict(),
+                                'model_3': personalized_models[3].state_dict(),
+                                'model_4': personalized_models[4].state_dict(),
+                                'model_5': personalized_models[5].state_dict(),
+                                'best_epoch': best_epoch,
+                                'best_acc': best_acc,
+                                'a_iter': a_iter
+                            }, SAVE_PATH)
+                        elif args.dataset == 'office_home':
+                            torch.save({
+                                'server_model': server_model.state_dict(),
+                                'model_0': personalized_models[0].state_dict(),
+                                'model_1': personalized_models[1].state_dict(),
+                                'model_2': personalized_models[2].state_dict(),
+                                'model_3': personalized_models[3].state_dict(),
+                                'best_epoch': best_epoch,
+                                'best_acc': best_acc,
+                                'a_iter': a_iter
+                            }, SAVE_PATH)
+            
+                        best_changed = False
+                        for client_idx, datasite in enumerate(datasets):
+                            _, test_acc = test(client_idx, models[client_idx], personalized_models[client_idx], extra_modules, test_loaders[client_idx], loss_fun, device, args, None, global_prototype)
+                            print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
+                            if args.log:
+                                logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
+
+
+                    if a_iter == args.iters-1:                
+                        for client_idx, datasite in enumerate(datasets):
+                            _, test_acc = test(client_idx, models[client_idx], personalized_models[client_idx], extra_modules, test_loaders[client_idx], loss_fun, device, args, None, global_prototype)               
+                            print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))                 
+                            if args.log:
+                                logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, best_epoch, test_acc[0], test_acc[1], test_acc[2]))
+
+                if log:
+                    logfile.flush()
+
+
     if log:
         logfile.flush()
         logfile.close()

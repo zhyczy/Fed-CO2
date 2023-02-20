@@ -1,6 +1,7 @@
 import sys, os
 from utils.utils import euclidean_dist
 import numpy as np
+import cvxpy as cp
 import copy
 import torch
 import torch.nn as nn
@@ -10,23 +11,23 @@ from collections import OrderedDict, defaultdict
 from utils.func import *
 
 
-def local_training(models, personalized_models, paggregation_models, hnet, server_model, global_prototypes, Extra_modules, valid_onehot, his_weight, args, train_loaders, test_loaders, optimizers, loss_fun, device, a_iter=0):
-    clinet_num = len(models)
+def local_training(models, personalized_models, paggregation_models, hnet, server_model, global_prototypes, Extra_modules, valid_onehot, his_weight, args, train_loaders, test_loaders, optimizers, loss_fun, device, a_iter=0, phase='Train'):
+    client_num = len(models)
     proto_dict = {}
-    client_weight = {x:[] for x in range(clinet_num)}
+    client_weight = {x:[] for x in range(client_num)}
     average_proto = 0
 
     if args.mode == 'fedtp':
         hnet.train()
         h_optimizer = optim.SGD(params=hnet.parameters(), lr=args.lr)
-        arr = np.arange(clinet_num)
+        arr = np.arange(client_num)
         weights = hnet(torch.tensor([arr], dtype=torch.long).to(device),False)
         for client_idx, model in enumerate(models):
             private_params = weights[client_idx]
             model.load_state_dict(private_params, strict=False)
             train_loss, train_acc = train(model, train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
 
-        for client_idx in range(clinet_num):
+        for client_idx in range(client_num):
             final_state = models[client_idx].state_dict()
             node_weights = weights[client_idx]
             inner_state = OrderedDict({k: tensor.data for k, tensor in node_weights.items()})
@@ -36,10 +37,10 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             )
 
             if client_idx == 0:
-                grads_update = [1/clinet_num  for x in hnet_grads]
+                grads_update = [1/client_num  for x in hnet_grads]
             else:
                 for g in range(len(hnet_grads)):
-                    grads_update[g] += 1/clinet_num * hnet_grads[g]
+                    grads_update[g] += 1/client_num * hnet_grads[g]
         h_optimizer.zero_grad()
         for p, g in zip(hnet.parameters(), grads_update):
             p.grad = g
@@ -49,18 +50,25 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
     elif args.mode == 'peer':
         Specific_head = {}
         Specific_adaptor = {}
-        for client_idx in range(clinet_num):
-            Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].classifier)
-        if args.version in [7, 8, 19, 20]:
-            for client_idx in range(clinet_num):
+        for client_idx in range(client_num):
+            if args.version in [51, 52, 53, 54]:
+                Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
+            elif args.version == 56:
+                Specific_head[client_idx] = copy.deepcopy(paggregation_models[client_idx].head)
+            elif args.version == 57:
+                Specific_head[client_idx] = [copy.deepcopy(paggregation_models[client_idx].head), copy.deepcopy(personalized_models[client_idx].head)]
+            else:
+                Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].classifier)
+        if args.version in [7, 8, 19, 20, 40, 41, 42]:
+            for client_idx in range(client_num):
                 Specific_adaptor[client_idx] = copy.deepcopy(personalized_models[client_idx].f_adaptor)
         elif args.version in [9, 10, 21, 22]:
-            for client_idx in range(clinet_num):
+            for client_idx in range(client_num):
                 Specific_adaptor[client_idx] = [copy.deepcopy(models[client_idx].adap3.state_dict()), copy.deepcopy(models[client_idx].adap4.state_dict()), copy.deepcopy(models[client_idx].adap5.state_dict())]
 
     elif args.mode == 'COPA':
         Specific_head = {}
-        for client_idx in range(clinet_num):
+        for client_idx in range(client_num):
             Specific_head[client_idx] = copy.deepcopy(models[client_idx].head)
 
     for client_idx, model in enumerate(models):
@@ -75,10 +83,10 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             p_optimizer = optim.SGD(params=personalized_models[client_idx].parameters(), lr=args.lr)
             criterion_ba = nn.CrossEntropyLoss().to(device)
     
-            if args.version == 17:
+            if args.version in [17, 61, 64]:
                 train_loss, train_acc = train_v0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, device)
 
-            elif args.version in [18, 27]:
+            elif args.version in [18, 27, 58, 59, 60, 63]:
                 train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
@@ -90,151 +98,18 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                           p_optimizer, loss_fun, criterion_ba, Extra_modules, client_idx, device)
 
-            elif args.version == 50:
-                train_loss, train_acc = train_tt_kll1(model, personalized_models[client_idx], train_loaders[client_idx], test_loaders[client_idx], 
-                                        optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, Specific_head, valid_onehot[client_idx], client_idx, device, a_iter)
+            elif args.version == 52:
+                train_loss, train_acc = train_gen0_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
-            elif args.version in [5, 15, 29, 30, 31]:
-                a_otimizer = optim.SGD(params=personalized_models[client_idx].f_adaptor.parameters(), lr=args.lr, momentum=args.momentum)
-                p_optimizer = optim.SGD(params=[{'params':personalized_models[client_idx].features.parameters()},
-                                     {'params':personalized_models[client_idx].classifier.parameters()}], lr=args.lr)
-                train_loss, train_acc = train_ada_shabby(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-
-            elif args.version in [6, 16]:
-                copy_model = copy.deepcopy(model)
-                optimizer = optim.SGD(params=[{'params':model.conv1.parameters()},
-                                            {'params':model.bn1.parameters()},
-                                            {'params':model.conv2.parameters()},
-                                            {'params':model.bn2.parameters()},
-                                            {'params':model.conv3.parameters()},
-                                            {'params':model.bn3.parameters()},
-                                            {'params':model.conv4.parameters()},
-                                            {'params':model.bn4.parameters()},
-                                            {'params':model.conv5.parameters()},
-                                            {'params':model.bn5.parameters()},
-                                            {'params':model.classifier.parameters()}], lr=args.lr, momentum=args.momentum)
-                a_otimizer = optim.SGD(params=[{'params':copy_model.adap3.parameters()},
-                                               {'params':copy_model.adap4.parameters()},
-                                               {'params':copy_model.adap5.parameters()}], lr=args.lr, momentum=args.momentum)
-                train_loss, train_acc = train_ada_residual(model, personalized_models[client_idx], copy_model, train_loaders[client_idx], optimizer, 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-
-            elif args.version in [7, 19]:
-                a_otimizer = optim.SGD(params=personalized_models[client_idx].f_adaptor.parameters(), lr=args.lr, momentum=args.momentum)
-                p_optimizer = optim.SGD(params=[{'params':personalized_models[client_idx].features.parameters()},
-                                     {'params':personalized_models[client_idx].classifier.parameters()}], lr=args.lr)
-                train_loss, train_acc = train_gen_plus0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, client_idx, device)
-
-            elif args.version in [8, 20]:
-                a_otimizer = optim.SGD(params=personalized_models[client_idx].f_adaptor.parameters(), lr=args.lr, momentum=args.momentum)
-                p_optimizer = optim.SGD(params=[{'params':personalized_models[client_idx].features.parameters()},
-                                     {'params':personalized_models[client_idx].classifier.parameters()}], lr=args.lr)
-                train_loss, train_acc = train_gen_plus1(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, client_idx, device)
-
-            elif args.version in [9, 21]:
-                copy_model = copy.deepcopy(model)
-                optimizer = optim.SGD(params=[{'params':model.conv1.parameters()},
-                                            {'params':model.bn1.parameters()},
-                                            {'params':model.conv2.parameters()},
-                                            {'params':model.bn2.parameters()},
-                                            {'params':model.conv3.parameters()},
-                                            {'params':model.bn3.parameters()},
-                                            {'params':model.conv4.parameters()},
-                                            {'params':model.bn4.parameters()},
-                                            {'params':model.conv5.parameters()},
-                                            {'params':model.bn5.parameters()},
-                                            {'params':model.classifier.parameters()}], lr=args.lr, momentum=args.momentum)
-                a_otimizer = optim.SGD(params=[{'params':copy_model.adap3.parameters()},
-                                               {'params':copy_model.adap4.parameters()},
-                                               {'params':copy_model.adap5.parameters()}], lr=args.lr, momentum=args.momentum)
-                train_loss, train_acc = train_gen_plus2(model, personalized_models[client_idx], copy_model, train_loaders[client_idx], optimizer, 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, client_idx, device)
-
-            elif args.version in [10, 22]:
-                copy_model = copy.deepcopy(model)
-                optimizer = optim.SGD(params=[{'params':model.conv1.parameters()},
-                                            {'params':model.bn1.parameters()},
-                                            {'params':model.conv2.parameters()},
-                                            {'params':model.bn2.parameters()},
-                                            {'params':model.conv3.parameters()},
-                                            {'params':model.bn3.parameters()},
-                                            {'params':model.conv4.parameters()},
-                                            {'params':model.bn4.parameters()},
-                                            {'params':model.conv5.parameters()},
-                                            {'params':model.bn5.parameters()},
-                                            {'params':model.classifier.parameters()}], lr=args.lr, momentum=args.momentum)
-                a_otimizer = optim.SGD(params=[{'params':copy_model.adap3.parameters()},
-                                               {'params':copy_model.adap4.parameters()},
-                                               {'params':copy_model.adap5.parameters()}], lr=args.lr, momentum=args.momentum)
-                train_loss, train_acc = train_gen_plus3(model, personalized_models[client_idx], copy_model, train_loaders[client_idx], optimizer, 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, client_idx, device)                
-
-            elif args.version == 11:
-                a_otimizer = optim.SGD(params=personalized_models[client_idx].f_adaptor.parameters(), lr=args.lr, momentum=args.momentum)
-                p_optimizer = optim.SGD(params=[{'params':personalized_models[client_idx].features.parameters()},
-                                     {'params':personalized_models[client_idx].classifier.parameters()}], lr=args.lr)
-                train_loss, train_acc = train_ada_shabby_kl(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-
-            elif args.version == 12:
-                a_otimizer = optim.SGD(params=personalized_models[client_idx].f_adaptor.parameters(), lr=args.lr, momentum=args.momentum)
-                p_optimizer = optim.SGD(params=[{'params':personalized_models[client_idx].features.parameters()},
-                                     {'params':personalized_models[client_idx].classifier.parameters()}], lr=args.lr)
-                train_loss, train_acc = train_ada_shabby_klcr(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-
-            elif args.version == 13:
-                copy_model = copy.deepcopy(model)
-                optimizer = optim.SGD(params=[{'params':model.conv1.parameters()},
-                                            {'params':model.bn1.parameters()},
-                                            {'params':model.conv2.parameters()},
-                                            {'params':model.bn2.parameters()},
-                                            {'params':model.conv3.parameters()},
-                                            {'params':model.bn3.parameters()},
-                                            {'params':model.conv4.parameters()},
-                                            {'params':model.bn4.parameters()},
-                                            {'params':model.conv5.parameters()},
-                                            {'params':model.bn5.parameters()},
-                                            {'params':model.classifier.parameters()}], lr=args.lr, momentum=args.momentum)
-                a_otimizer = optim.SGD(params=[{'params':copy_model.adap3.parameters()},
-                                               {'params':copy_model.adap4.parameters()},
-                                               {'params':copy_model.adap5.parameters()}], lr=args.lr, momentum=args.momentum)
-                train_loss, train_acc = train_ada_residual_kl(model, personalized_models[client_idx], copy_model, train_loaders[client_idx], optimizer, 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-
-            elif args.version == 14:
-                copy_model = copy.deepcopy(model)
-                optimizer = optim.SGD(params=[{'params':model.conv1.parameters()},
-                                            {'params':model.bn1.parameters()},
-                                            {'params':model.conv2.parameters()},
-                                            {'params':model.bn2.parameters()},
-                                            {'params':model.conv3.parameters()},
-                                            {'params':model.bn3.parameters()},
-                                            {'params':model.conv4.parameters()},
-                                            {'params':model.bn4.parameters()},
-                                            {'params':model.conv5.parameters()},
-                                            {'params':model.bn5.parameters()},
-                                            {'params':model.classifier.parameters()}], lr=args.lr, momentum=args.momentum)
-                a_otimizer = optim.SGD(params=[{'params':copy_model.adap3.parameters()},
-                                               {'params':copy_model.adap4.parameters()},
-                                               {'params':copy_model.adap5.parameters()}], lr=args.lr, momentum=args.momentum)
-                train_loss, train_acc = train_ada_residual_klcr(model, personalized_models[client_idx], copy_model, train_loaders[client_idx], optimizer, 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-
-            elif args.version == 24:
-                a_otimizer = optim.SGD(params=personalized_models[client_idx].f_adaptor.parameters(), lr=args.lr, momentum=args.momentum)
-                p_optimizer = optim.SGD(params=[{'params':personalized_models[client_idx].features.parameters()},
-                                     {'params':personalized_models[client_idx].classifier.parameters()}], lr=args.lr)
-                train_loss, train_acc = train_ada_shabby2(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+            elif args.version == 62:
+                train_loss, train_acc = train_gen_valid(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
             else:
-                train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], train_loaders[client_idx], test_loaders[client_idx], 
+                train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], Extra_modules, paggregation_models, train_loaders[client_idx], test_loaders[client_idx], 
                                         optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, valid_onehot[client_idx], 
-                                        client_idx, device, args, a_iter)
+                                        client_idx, device, args, a_iter, phase)
 
         elif args.mode == 'fedper':
             private_params = personalized_models[client_idx].state_dict()
@@ -260,6 +135,12 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
         else:
             train_loss, train_acc = train(model, train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
 
+    if args.mode == 'peer':
+        if args.version in [59, 60, 61]:
+            with torch.no_grad():
+                for client_idx, model in enumerate(models):
+                    client_weight[client_idx] = weight_calculate(models, test_loaders[client_idx], loss_fun, client_num, device)
+
     return train_loss, train_acc, proto_dict, client_weight
 
 
@@ -271,7 +152,6 @@ def train_v0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss
     correct = 0
     for data, target in data_loader:
         optimizer.zero_grad()
-
         data = data.to(device)
         target = target.to(device)
         output_g = model(data)
@@ -294,9 +174,9 @@ def train_v0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss
 
 
 def train_gen0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
-    clinet_num = len(Specific_heads.keys())
-    assert clinet_num != 0
-    l_lambda = 1/(clinet_num-1)
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
     model.train()
     p_model.train()
     loss_all = 0
@@ -314,7 +194,7 @@ def train_gen0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, lo
         part1 = loss_g(output_g, target)
 
         part2 = 0
-        for idxx in range(clinet_num):
+        for idxx in range(client_num):
             if idxx != client_idx:
                 Spe_classifier = Specific_heads[idxx]
                 output_gen = Spe_classifier(feature_g)
@@ -336,10 +216,52 @@ def train_gen0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, lo
     return loss_all / len(data_loader), correct/total
 
 
+def train_gen0_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    model.train()
+    p_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.head(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.head(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                output_gen = Spe_classifier(feature_g)
+                part2 += loss_g(output_gen, target)
+        loss = part1 + part2
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
 def train_gen_full(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
-    clinet_num = len(Specific_heads.keys())
-    assert clinet_num != 0
-    l_lambda = 1/(clinet_num-1)
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
     model.train()
     p_model.train()
     loss_all = 0
@@ -358,7 +280,7 @@ def train_gen_full(model, p_model, data_loader, optimizer, p_optimizer, loss_fun
 
         part2 = 0
         part3 = 0
-        for idxx in range(clinet_num):
+        for idxx in range(client_num):
             if idxx != client_idx:
                 Spe_classifier = Specific_heads[idxx]
                 output_gen = Spe_classifier(feature_g)
@@ -583,135 +505,9 @@ def AlignFed_train1(model, data_loader, optimizer, global_prototypes, loss_fun, 
     return loss_all / len(data_loader), correct/total, proto
 
 
-def train_tt_kll1(model, p_model, data_loader, unlabeled_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, onehot_value, client_idx, device, a_iter):
-    kl_loss = nn.KLDivLoss(reduction='batchmean')
-    clinet_num = len(Specific_heads.keys())
-    assert clinet_num != 0
-    l_lambda = 1/(clinet_num-1)
-    model.train()
-    p_model.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.classifier(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
-
-        part2 = 0
-        for idxx in range(clinet_num):
-            if idxx != client_idx:
-                Spe_classifier = Specific_heads[idxx]
-                output_gen = Spe_classifier(feature_g)
-                # part2 += l_lambda * loss_g(output_gen, target)
-                part2 += loss_g(output_gen, target)
-        loss = part1 + part2
-        loss.backward()
-        optimizer.step()
-
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-    if a_iter >= 100:
-        inner_count = 0
-        for data, _ in unlabeled_loader:
-            if data.shape[0] != 32:
-                continue
-            data = data.to(device)
-            output_g = model(data)
-            output_p = p_model(data)
-
-            if onehot_value == 0:
-                optimizer.zero_grad()
-                loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(output_p.detach(), dim=1))
-                loss.backward()
-                optimizer.step()
-
-            elif onehot_value == 1:
-                p_optimizer.zero_grad()
-                loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(output_g.detach(), dim=1))
-                loss_p.backward()
-                p_optimizer.step()
-
-    return loss_all / len(data_loader), correct/total
-
-
-def train_ada_shabby(model, p_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
-    clinet_num = len(Specific_heads.keys())
-    assert clinet_num != 0
-    l_lambda = 1/(clinet_num-1)
-    model.train()
-    p_model.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.classifier(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
-
-        part2 = 0
-        for idxx in range(clinet_num):
-            if idxx != client_idx:
-                Spe_classifier = Specific_heads[idxx]
-                output_gen = Spe_classifier(feature_g)
-                # part2 += l_lambda * loss_g(output_gen, target)
-                part2 += loss_g(output_gen, target)
-        loss = part1 + part2 
-        loss.backward()
-        optimizer.step()
-
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        a_otimizer.zero_grad()
-        adapt_feature = p_model.f_adaptor(feature_g.detach())
-        adapt_classifier = copy.deepcopy(p_model.classifier)
-        adapt_loss = loss_fun(adapt_classifier(adapt_feature), target)
-        adapt_loss.backward()
-        a_otimizer.step()
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        # if client_idx == 3:
-        #     print("After adaptor optimization.")
-        #     for name, params in p_model.classifier.named_parameters():
-        #         # print("name: ", name)
-        #         if name == 'fc3.weight':
-        #             print("grads:", params.grad)
-        # break
-
-    return loss_all / len(data_loader), correct/total
-
-
 def train_COPA(model, Specific_heads, data_loader, optimizer, loss_fun, client_idx, device):
-    clinet_num = len(Specific_heads.keys())
-    assert clinet_num != 0
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
     model.train()
     loss_all = 0
     total = 0
@@ -726,7 +522,7 @@ def train_COPA(model, Specific_heads, data_loader, optimizer, loss_fun, client_i
         part1 = loss_fun(output, target)
 
         part2 = 0
-        for idxx in range(clinet_num):
+        for idxx in range(client_num):
             if idxx != client_idx:
                 Spe_classifier = Specific_heads[idxx]
                 output_gen = Spe_classifier(local_feature)
@@ -744,63 +540,27 @@ def train_COPA(model, Specific_heads, data_loader, optimizer, loss_fun, client_i
     return loss_all / len(data_loader), correct/total
 
 
-def train_ada_residual(model, p_model, copy_model, data_loader, optimizer, p_optimizer, a_otimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
-    clinet_num = len(Specific_heads.keys())
-    assert clinet_num != 0
-    l_lambda = 1/(clinet_num-1)
-    model.train()
-    p_model.train()
-    copy_model.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.classifier(feature_p)
+def weight_calculate(models, test_loader, loss_fun, client_num, device):
+    weight_list = []
 
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
+    for ccix in range(client_num):
+        ttt_model = copy.deepcopy(models[ccix])
+        ttt_model.eval()
+        loss_all = 0
+        total = 0
+        correct = 0
+        for data, target in test_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_g = ttt_model(data)
+            # loss = loss_g(output_g, target)
 
-        part2 = 0
-        for idxx in range(clinet_num):
-            if idxx != client_idx:
-                Spe_classifier = Specific_heads[idxx]
-                output_gen = Spe_classifier(feature_g)
-                # part2 += l_lambda * loss_g(output_gen, target)
-                part2 += loss_g(output_gen, target)
-        loss = part1 + part2 
-        loss.backward()
-        optimizer.step()
+            # loss_all += loss.item()
+            total += target.size(0)
+            pred = output_g.data.max(1)[1]
+            correct += pred.eq(target.view(-1)).sum().item()
+        weight_list.append(correct/total)
 
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        for kkk in model.state_dict().keys():
-            if 'adap' not in kkk:
-                if 'num_batches_tracked' not in kkk:
-                    copy_model.state_dict()[kkk].data.copy_(model.state_dict()[kkk])
-
-        a_otimizer.zero_grad()
-        adapt_feature = copy_model.produce_adapt_feature(data)
-        adapt_classifier = copy.deepcopy(p_model.classifier)
-        adapt_loss = loss_fun(adapt_classifier(adapt_feature), target)
-        adapt_loss.backward()
-        a_otimizer.step()
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-    for kkk in copy_model.state_dict().keys():
-        if 'adap' in kkk:
-            model.state_dict()[kkk].data.copy_(copy_model.state_dict()[kkk])
-
-    return loss_all / len(data_loader), correct/total
-
+    acc_sum = sum(weight_list)
+    w_list = [x/acc_sum for x in weight_list]
+    return w_list
