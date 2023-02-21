@@ -1,7 +1,7 @@
 import sys, os
 from utils.utils import euclidean_dist
 import numpy as np
-import cvxpy as cp
+import math
 import copy
 import torch
 import torch.nn as nn
@@ -51,7 +51,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
         Specific_head = {}
         Specific_adaptor = {}
         for client_idx in range(client_num):
-            if args.version in [51, 52, 53, 54]:
+            if args.version in [51, 52, 53, 54, 67, 66, 69]:
                 Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
             elif args.version == 56:
                 Specific_head[client_idx] = copy.deepcopy(paggregation_models[client_idx].head)
@@ -65,6 +65,13 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
         elif args.version in [9, 10, 21, 22]:
             for client_idx in range(client_num):
                 Specific_adaptor[client_idx] = [copy.deepcopy(models[client_idx].adap3.state_dict()), copy.deepcopy(models[client_idx].adap4.state_dict()), copy.deepcopy(models[client_idx].adap5.state_dict())]
+        elif args.version in [65, 66, 68, 69]:
+            for client_idx in range(client_num):
+                Specific_adaptor[client_idx] = {}
+                for kky in personalized_models[client_idx].state_dict().keys():
+                    if 'bn' in kky:
+                        if 'num_batches_tracked' not in kky:
+                            Specific_adaptor[client_idx][kky] = copy.deepcopy(personalized_models[client_idx].state_dict()[kky])
 
     elif args.mode == 'COPA':
         Specific_head = {}
@@ -98,13 +105,17 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                           p_optimizer, loss_fun, criterion_ba, Extra_modules, client_idx, device)
 
-            elif args.version == 52:
+            elif args.version in [52, 67]:
                 train_loss, train_acc = train_gen0_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
-            elif args.version == 62:
-                train_loss, train_acc = train_gen_valid(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+            elif args.version in [65, 68]:
+                train_loss, train_acc = train_bn_adap_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_adaptor, client_idx, device)
+
+            elif args.version in [66, 69]:
+                train_loss, train_acc = train_bn_adap_gen_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, client_idx, device)
 
             else:
                 train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], Extra_modules, paggregation_models, train_loaders[client_idx], test_loaders[client_idx], 
@@ -197,8 +208,8 @@ def train_gen0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, lo
         for idxx in range(client_num):
             if idxx != client_idx:
                 Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
                 output_gen = Spe_classifier(feature_g)
-                # part2 += l_lambda * loss_g(output_gen, target)
                 part2 += loss_g(output_gen, target)
         loss = part1 + part2
         loss.backward()
@@ -240,6 +251,7 @@ def train_gen0_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fu
         for idxx in range(client_num):
             if idxx != client_idx:
                 Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
                 output_gen = Spe_classifier(feature_g)
                 part2 += loss_g(output_gen, target)
         loss = part1 + part2
@@ -255,6 +267,130 @@ def train_gen0_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fu
         total += target.size(0)
         pred = (output_g.detach()+output_p).data.max(1)[1]
         correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def train_bn_adap_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_adaptors, client_idx, device):
+    client_num = len(Specific_adaptors.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    back_model = copy.deepcopy(model)
+    back_model.eval()
+    model.train()
+    p_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.head(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.head(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                BN_list = Specific_adaptors[idxx]
+                for kky in back_model.state_dict().keys():
+                    if 'bn' in kky:
+                        if 'num_batches_tracked' not in kky:
+                            back_model.state_dict()[kky].data.copy_(BN_list[kky])
+                # print("conv weight: ", back_model.state_dict()["features.conv2.weight"][0])
+                # if idxx == 1:
+                #     print("bn2 weight: ", back_model.state_dict()["features.bn2.weight"][0])
+                #     print("bn2 running_mean: ", back_model.state_dict()["features.bn2.running_mean"][0])
+
+                feature_gen = back_model.produce_feature(data)
+                output_gen = model.head(feature_gen.detach())
+                part2 += loss_g(output_gen, target)
+
+        loss = part1 + part2
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        for key in back_model.state_dict().keys():
+            if 'num_batches_tracked' in key:
+                continue
+            else:
+                back_model.state_dict()[key].data.copy_(model.state_dict()[key])
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+    return loss_all / len(data_loader), correct/total
+
+
+def train_bn_adap_gen_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, Specific_adaptors, client_idx, device):
+    client_num = len(Specific_adaptors.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    back_model = copy.deepcopy(model)
+    back_model.eval()
+    model.train()
+    p_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.head(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.head(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2, part3 = 0, 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                BN_list = Specific_adaptors[idxx]
+                Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
+                for kky in back_model.state_dict().keys():
+                    if 'bn' in kky:
+                        if 'num_batches_tracked' not in kky:
+                            back_model.state_dict()[kky].data.copy_(BN_list[kky])
+
+                feature_gen = back_model.produce_feature(data)
+                output_gen = model.head(feature_gen.detach())
+                output_ggg = Spe_classifier(feature_g)
+                part2 += loss_g(output_ggg, target)
+                part3 += loss_g(output_gen, target)
+
+        loss = part1 + part2 + part3
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        for key in back_model.state_dict().keys():
+            if 'num_batches_tracked' in key:
+                continue
+            else:
+                back_model.state_dict()[key].data.copy_(model.state_dict()[key])
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
     return loss_all / len(data_loader), correct/total
 
 
@@ -283,6 +419,7 @@ def train_gen_full(model, p_model, data_loader, optimizer, p_optimizer, loss_fun
         for idxx in range(client_num):
             if idxx != client_idx:
                 Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
                 output_gen = Spe_classifier(feature_g)
                 output_per = Spe_classifier(feature_p)
                 # part2 += l_lambda * loss_g(output_gen, target)
@@ -564,3 +701,4 @@ def weight_calculate(models, test_loader, loss_fun, client_num, device):
     acc_sum = sum(weight_list)
     w_list = [x/acc_sum for x in weight_list]
     return w_list
+

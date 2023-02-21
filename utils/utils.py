@@ -42,7 +42,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                 models[client_idx].load_state_dict(copy.deepcopy(paggre_models[client_idx].state_dict()))
 
         elif args.mode.lower() == 'peer':
-            if args.version in [63, 64]:
+            if args.version in [63, 64, 67, 68, 69]:
                 for key in server_model.state_dict().keys():
                     if 'bn' not in key:
                         temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
@@ -197,6 +197,8 @@ def test(client_idx, model, p_model, extra_modules, data_loader, loss_fun, devic
             test_loss, test_acc = peer_shabby_adaptor_validate(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device)
         elif args.version in [6, 13, 14, 21, 22]:
             test_loss, test_acc = peer_residual_adaptor(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device)
+        elif args.version in [65, 66, 68, 69]:
+            test_loss, test_acc = peer_BN_test(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device)
         else:
             test_loss, test_acc = peer_test(model, p_model, data_loader, loss_fun, device)
     elif args.mode == 'fedper':
@@ -572,6 +574,88 @@ def peer_gen_test(model, p_model, extra_modules, data_loader, loss_fun, client_i
         correct_p += pred_p.eq(target.view(-1)).sum().item()
         pred_geng = output_geng.data.max(1)[1]
         correct_geng += pred_geng.eq(target.view(-1)).sum().item()
+
+    for idxx in range(client_num):
+        if idxx != client_idx:
+            adapt_loss_dict[idxx] = adapt_loss_dict[idxx]/len(data_loader)
+            adapt_acc_dict[idxx] = adapt_acc_dict[idxx]/total
+
+    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_geng/len(data_loader), adapt_loss_dict]
+    test_acc = [correct/total, correct_g/total, correct_p/total, correct_geng/total, adapt_acc_dict]
+    return test_loss, test_acc
+
+
+def peer_BN_test(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device):
+    client_num = len(extra_modules)
+    assert client_num != 0
+    model.eval()
+    p_model.eval()
+    back_model = copy.deepcopy(model)
+    back_model.eval()
+    loss_all, loss_ga, loss_pa, loss_geng = 0, 0, 0, 0
+    total = 0
+    correct, correct_g, correct_p, correct_geng = 0, 0, 0, 0
+    adapt_loss_dict = {}
+    adapt_acc_dict = {}
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.head(feature_g)
+        output_p = p_model(data)
+
+        output = output_g.detach() + output_p.detach()
+        output_geng = copy.deepcopy(output_g.detach())
+
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                BN_list = extra_modules[idxx]
+                for kky in back_model.state_dict().keys():
+                    if 'bn' in kky:
+                        if 'num_batches_tracked' not in kky:
+                            back_model.state_dict()[kky].data.copy_(BN_list[kky])
+                gg_head = copy.deepcopy(model.head)
+                gg_head.eval()
+                feature_gen = back_model.produce_feature(data)
+                output_ggg = gg_head(feature_gen.detach())
+                loss = loss_fun(output_ggg, target)
+                pred = output_ggg.max(1)[1]
+                correct_ada = pred.eq(target.view(-1)).sum().item()
+
+                if idxx in adapt_loss_dict.keys():
+                    adapt_loss_dict[idxx] += loss.item()
+                    adapt_acc_dict[idxx] += correct_ada
+                else:
+                    adapt_loss_dict[idxx] = loss.item()
+                    adapt_acc_dict[idxx] = correct_ada
+                output_geng += output_ggg.detach()
+
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss_g = loss_fun(output_g, target)
+        loss_p = loss_fun(output_p, target)
+        loss_gg = loss_fun(output_geng, target)
+        loss_ga += loss_g.item()
+        loss_pa += loss_p.item()
+        loss_geng += loss_gg.item()
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+        pred_geng = output_geng.data.max(1)[1]
+        correct_geng += pred_geng.eq(target.view(-1)).sum().item()
+
+    #     print("output_geng: ", output_geng)
+    #     print("output_g: ", output_g)
+    # print(correct_geng)
+    # print(correct_g)
+    # assert False
 
     for idxx in range(client_num):
         if idxx != client_idx:
@@ -1045,3 +1129,50 @@ def visualize_combination(client_idx, model, p_models, data_loader, loss_fun, de
         print("P Dif Var: ", p_dif_var, " P Avg Dif: ", p_avg_dif)
         print(" ")
 
+
+def adapt_lambda(client_idx, model, p_model, data_loader, test_loader, loss_fun, device, args, flag=2, daset='domainnet'):
+    model.eval()
+    p_model.eval()
+    total = 0
+    correct, correct_g, correct_p = 0, 0, 0
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output_g = model(data)
+        output_p = p_model(data)
+
+        output = output_g.detach()+output_p
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+
+    rate_p = correct_p/total
+    rate_g = correct_g/total
+    rate_sum = rate_p + rate_g
+    print("P acc: ", rate_p," G acc: ", rate_g)
+    ratio_p = rate_p/rate_sum
+    ratio_g = rate_g/rate_sum
+    print("P ratio: ", ratio_p, " G ratio: ", ratio_g)
+    print("Oiginal Acc rate: ", correct/total)
+
+    correct = 0
+    total = 0
+    for data, target in test_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output_g = model(data)
+        output_p = p_model(data)
+        output = ratio_g * output_g + ratio_p * output_p
+
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+        total += target.size(0)
+
+    print("Combination Acc rate: ", correct/total)

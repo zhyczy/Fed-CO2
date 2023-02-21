@@ -157,3 +157,7 @@ def definite_version(version):
 
     elif version == 57:
         print("Version57: Generalize on backup branch and personal branch")
+
+    elif version == 62:
+        print("Check BN in version18, it seems we need to set spe_classifier eval() to keep the running mean and running var right")
+        print("Now V18 has been modified to be the same as V62, add spe_classifier.eval()")

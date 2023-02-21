@@ -330,6 +330,9 @@ def others_train(version, model, p_model, Extra_modules, paggregation_models, tr
         train_loss, train_acc = train_gen_orthP_extend(model, p_model, paggregation_models[client_idx], train_loader, optimizer, 
                                           p_optimizer, a_otimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
+    elif args.version == 62:
+        train_loss, train_acc = train_gen_valid(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                          p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
     return train_loss, train_acc
 
