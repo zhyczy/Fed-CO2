@@ -161,3 +161,15 @@ def definite_version(version):
     elif version == 62:
         print("Check BN in version18, it seems we need to set spe_classifier eval() to keep the running mean and running var right")
         print("Now V18 has been modified to be the same as V62, add spe_classifier.eval()")
+
+    elif version == 66:
+        print("Version66: V18 + V65")
+
+    elif version == 67:
+        print("Version67: V63 and now classifier is only one layer")
+
+    elif version == 68:
+        print("version68: V65 + V63")
+
+    elif version == 69:
+        print("Version69: V66 + V63")

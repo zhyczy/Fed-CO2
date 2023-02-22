@@ -51,7 +51,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
         Specific_head = {}
         Specific_adaptor = {}
         for client_idx in range(client_num):
-            if args.version in [51, 52, 53, 54, 67, 66, 69]:
+            if args.version in [51, 52, 53, 54, 67, 66, 69, 72, 73, 74, 75, 77, 78, 79, 80]:
                 Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
             elif args.version == 56:
                 Specific_head[client_idx] = copy.deepcopy(paggregation_models[client_idx].head)
@@ -93,7 +93,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             if args.version in [17, 61, 64]:
                 train_loss, train_acc = train_v0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, device)
 
-            elif args.version in [18, 27, 58, 59, 60, 63]:
+            elif args.version in [18, 27, 58, 59, 60, 63, 83]:
                 train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
@@ -105,7 +105,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                           p_optimizer, loss_fun, criterion_ba, Extra_modules, client_idx, device)
 
-            elif args.version in [52, 67]:
+            elif args.version in [52, 67, 72, 73, 74, 75, 77, 78, 79, 80]:
                 train_loss, train_acc = train_gen0_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
@@ -116,6 +116,33 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             elif args.version in [66, 69]:
                 train_loss, train_acc = train_bn_adap_gen_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, client_idx, device)
+
+            elif args.version in [70, 76, 82]:
+                if phase == 'Train':
+                    train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+                elif phase == 'Valid':
+                    a_optimizer = optim.SGD(params=Extra_modules[client_idx].parameters(), lr=1)
+                    train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
+                                                  a_optimizer, loss_fun, client_idx, device)
+
+            elif args.version == 71:
+                if phase == 'Train':
+                    train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+                elif phase == 'Valid':
+                    a_optimizer = optim.SGD(params=Extra_modules[client_idx].parameters(), lr=args.lr)
+                    train_loss, train_acc = train_valid_linear(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
+                                                  a_optimizer, loss_fun, client_idx, device)
+
+            elif args.version == 81:
+                if phase == 'Train':
+                    train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+                elif phase == 'Valid':
+                    a_optimizer = optim.SGD(params=Extra_modules[client_idx].parameters(), lr=1)
+                    train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
+                                                  a_optimizer, loss_fun, client_idx, device)
 
             else:
                 train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], Extra_modules, paggregation_models, train_loaders[client_idx], test_loaders[client_idx], 
@@ -147,10 +174,55 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             train_loss, train_acc = train(model, train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
 
     if args.mode == 'peer':
-        if args.version in [59, 60, 61]:
+        if args.version in [59, 60, 61, 79, 80]:
             with torch.no_grad():
-                for client_idx, model in enumerate(models):
-                    client_weight[client_idx] = weight_calculate(models, test_loaders[client_idx], loss_fun, client_num, device)
+                if args.version in [59, 60, 61]:
+                    for client_idx, model in enumerate(models):
+                        client_weight[client_idx] = weight_calculate(models, test_loaders[client_idx], loss_fun, client_num, device)
+                elif args.version == 79:
+                    for client_idx, model in enumerate(personalized_models):
+                        client_weight[client_idx] = weight_calculate(personalized_models, train_loaders[client_idx], loss_fun, client_num, device)
+                elif args.version == 80:
+                    for client_idx, model in enumerate(personalized_models):
+                        client_weight[client_idx] = weight_calculate(models, train_loaders[client_idx], loss_fun, client_num, device)
+        elif args.version in [72, 73, 74, 75]:
+            Specific_adaptor = {}
+            with torch.no_grad():
+                for client_idx in range(client_num):
+                    Specific_adaptor[client_idx] = {}
+                    for kky in personalized_models[client_idx].state_dict().keys():
+                        if 'bn' in kky:
+                            if 'num_batches_tracked' not in kky:
+                                Specific_adaptor[client_idx][kky] = copy.deepcopy(personalized_models[client_idx].state_dict()[kky])
+                if args.version == 72:
+                    for client_idx, model in enumerate(models):
+                        client_weight[client_idx] = weight_calculate_BN_fcos(model, train_loaders[client_idx], Specific_adaptor, loss_fun, client_num, device)
+                elif args.version == 73:
+                    for client_idx, model in enumerate(models):
+                        client_weight[client_idx] = weight_calculate_BN_lcos(model, train_loaders[client_idx], Specific_adaptor, loss_fun, client_num, device)
+                elif args.version == 74:
+                    for client_idx, model in enumerate(models):
+                        client_weight[client_idx] = weight_calculate_BN_fkl(model, train_loaders[client_idx], Specific_adaptor, loss_fun, client_num, device)
+                elif args.version == 75:
+                    for client_idx, model in enumerate(models):
+                        client_weight[client_idx] = weight_calculate_BN_lkl(model, train_loaders[client_idx], Specific_adaptor, loss_fun, client_num, device)
+        elif args.version in [77, 78]:
+            Specific_adaptor = {}
+            Specific_head = {}
+            with torch.no_grad():
+                for client_idx in range(client_num):
+                    Specific_adaptor[client_idx] = {}
+                    for kky in personalized_models[client_idx].state_dict().keys():
+                        if 'bn' in kky:
+                            if 'num_batches_tracked' not in kky:
+                                Specific_adaptor[client_idx][kky] = copy.deepcopy(personalized_models[client_idx].state_dict()[kky])
+                    Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
+                if args.version == 77:
+                    for client_idx, model in enumerate(models):
+                        client_weight[client_idx] = weight_calculate_BN_head_lcos(model, train_loaders[client_idx], Specific_adaptor, Specific_head, loss_fun, client_num, device)
+                elif args.version == 78:
+                    for client_idx, model in enumerate(models):
+                        client_weight[client_idx] = weight_calculate_BN_head_lkl(model, train_loaders[client_idx], Specific_adaptor, Specific_head, loss_fun, client_num, device)
 
     return train_loss, train_acc, proto_dict, client_weight
 
@@ -225,6 +297,72 @@ def train_gen0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, lo
         pred = (output_g.detach()+output_p).data.max(1)[1]
         correct += pred.eq(target.view(-1)).sum().item()
     return loss_all / len(data_loader), correct/total
+
+
+def train_valid_lambda(model, p_model, lab_para, valid_loader, a_optimizer, loss_fun, client_idx, device):
+    model.eval()
+    p_model.eval()
+    lab_para.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    # print("client: ", client_idx)
+    for data, target in valid_loader:
+        data = data.to(device)
+        target = target.to(device)
+        output_g = model(data)
+        output_p = p_model(data)
+
+        lam_p = torch.sigmoid(lab_para(torch.tensor([0], dtype=torch.long).to(device)))
+        lam_g = 1- lam_p
+        output = lam_g * output_g.detach() + lam_p * output_p.detach()
+
+        a_optimizer.zero_grad()
+        loss_lam = loss_fun(output, target)
+        loss_lam.backward()
+        a_optimizer.step()
+
+        loss_all += loss_lam.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        # print(lam_p)
+        # print(lab_para.state_dict().items())
+        # print("One round ends")
+        # print(" ")
+        # print(model.state_dict()['features.conv2.weight'])
+    return loss_all / len(valid_loader), correct/total
+
+
+def train_valid_linear(model, p_model, linear_para, valid_loader, a_optimizer, loss_fun, client_idx, device):
+    model.eval()
+    p_model.eval()
+    linear_para.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    for data, target in valid_loader:
+        data = data.to(device)
+        target = target.to(device)
+        output_g = model(data)
+        output_p = p_model(data)
+
+        com = torch.cat([output_g.detach(), output_p.detach()], dim=1)
+        output = linear_para(com)
+
+        a_optimizer.zero_grad()
+        loss_lam = loss_fun(output, target)
+        loss_lam.backward()
+        a_optimizer.step()
+
+        loss_all += loss_lam.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(valid_loader), correct/total
 
 
 def train_gen0_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
@@ -701,4 +839,227 @@ def weight_calculate(models, test_loader, loss_fun, client_num, device):
     acc_sum = sum(weight_list)
     w_list = [x/acc_sum for x in weight_list]
     return w_list
+
+
+def weight_calculate_BN_fcos(model, data_loader, Specific_adaptors, loss_fun, client_num, device):
+    weight_list = []
+    ttt_model = copy.deepcopy(model)
+    ttt_model.eval()
+    total = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = ttt_model.produce_feature(data)
+        output_g = ttt_model.head(feature_g)
+        total += data.shape[0]
+
+        for ccix in range(client_num):
+            BN_list = Specific_adaptors[ccix]
+            for kky in ttt_model.state_dict().keys():
+                if 'bn' in kky:
+                    if 'num_batches_tracked' not in kky:
+                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
+
+            feature_gen = ttt_model.produce_feature(data)
+            feature_sim = torch.cosine_similarity(feature_g, feature_gen, dim=1)
+
+            feature_sim_sum = torch.sum(feature_sim)
+            if len(weight_list) != client_num:
+                weight_list.append(feature_sim_sum)
+            else:
+                weight_list[ccix] += feature_sim_sum
+
+    we_list = [torch.exp(-x/total).item() for x in weight_list]
+    fw_sum = sum(we_list)
+    w_list = [x/fw_sum for x in we_list]
+    # print("w list: ", w_list)
+    return w_list
+
+
+def weight_calculate_BN_lcos(model, data_loader, Specific_adaptors, loss_fun, client_num, device):
+    standard_list = []
+    ttt_model = copy.deepcopy(model)
+    ttt_model.eval()
+    total = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = ttt_model.produce_feature(data)
+        output_g = ttt_model.head(feature_g)
+        total += data.shape[0]
+
+        for ccix in range(client_num):
+            BN_list = Specific_adaptors[ccix]
+            for kky in ttt_model.state_dict().keys():
+                if 'bn' in kky:
+                    if 'num_batches_tracked' not in kky:
+                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
+
+            output_gen = ttt_model(data)
+            logit_sim = torch.cosine_similarity(output_g, output_gen, dim=1)
+
+            logit_sim_sum = torch.sum(logit_sim)
+            if len(standard_list) != client_num:
+                standard_list.append(logit_sim_sum)
+            else:
+                standard_list[ccix] += logit_sim_sum 
+
+    st_list = [torch.exp(-x/total).item() for x in standard_list]
+    lg_sum = sum(st_list)
+    l_list = [x/lg_sum for x in st_list]
+    # print("l_list: ", l_list)
+    return l_list
+
+
+def weight_calculate_BN_fkl(model, data_loader, Specific_adaptors, loss_fun, client_num, device):
+    kl_loss = nn.KLDivLoss(reduction='none')
+    weight_list = []
+    ttt_model = copy.deepcopy(model)
+    ttt_model.eval()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = ttt_model.produce_feature(data)
+        # print("outer")
+        # print("outside: ", ttt_model.state_dict()["features.bn2.weight"])
+        for ccix in range(client_num):
+            BN_list = Specific_adaptors[ccix]
+            for kky in ttt_model.state_dict().keys():
+                if 'bn' in kky:
+                    if 'num_batches_tracked' not in kky:
+                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
+
+            # if ccix == 1:
+            #     print(ccix)
+            #     print(BN_list["features.bn2.weight"])
+
+            feature_gen = ttt_model.produce_feature(data)
+            feature_sim = torch.sum(kl_loss(F.log_softmax(feature_gen, dim=1), F.softmax(feature_g, dim=1)))
+
+            if len(weight_list) != client_num:
+                weight_list.append(feature_sim)
+            else:
+                weight_list[ccix] += feature_sim
+
+        # break
+
+    we_list = [torch.exp(-x).item()+1e-9 for x in weight_list]
+    # print(we_list)
+    # assert False
+    fw_sum = sum(we_list)
+    w_list = [x/fw_sum for x in we_list]
+    # print("w list: ", w_list)
+    return w_list
+
+
+def weight_calculate_BN_lkl(model, data_loader, Specific_adaptors, loss_fun, client_num, device):
+    kl_loss = nn.KLDivLoss(reduction='none')
+    standard_list = []
+    ttt_model = copy.deepcopy(model)
+    ttt_model.eval()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        output_g = ttt_model(data)
+
+        for ccix in range(client_num):
+            BN_list = Specific_adaptors[ccix]
+            for kky in ttt_model.state_dict().keys():
+                if 'bn' in kky:
+                    if 'num_batches_tracked' not in kky:
+                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
+
+            output_gen = ttt_model(data)
+            logit_sim = torch.sum(kl_loss(F.log_softmax(output_gen, dim=1), F.softmax(output_g, dim=1)))
+
+            logit_sim_sum = torch.sum(logit_sim)
+            if len(standard_list) != client_num:
+                standard_list.append(logit_sim)
+            else:
+                standard_list[ccix] += logit_sim 
+
+    st_list = [torch.exp(-x).item()+1e-9 for x in standard_list]
+    lg_sum = sum(st_list)
+    l_list = [x/lg_sum for x in st_list]
+    # print("l_list: ", l_list)
+    return l_list
+
+
+def weight_calculate_BN_head_lcos(model, data_loader, Specific_adaptors, Specific_heads, loss_fun, client_num, device):
+    standard_list = []
+    ttt_model = copy.deepcopy(model)
+    ttt_model.eval()
+    total = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = ttt_model.produce_feature(data)
+        output_g = ttt_model.head(feature_g)
+        total += data.shape[0]
+
+        for ccix in range(client_num):
+            BN_list = Specific_adaptors[ccix]
+            Specific_head = Specific_heads[ccix]
+            Specific_head.eval()
+            for kky in ttt_model.state_dict().keys():
+                if 'bn' in kky:
+                    if 'num_batches_tracked' not in kky:
+                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
+
+            feature_gen = ttt_model.produce_feature(data)
+            output_gen = Specific_head(feature_gen)
+            logit_sim = torch.cosine_similarity(output_g, output_gen, dim=1)
+
+            logit_sim_sum = torch.sum(logit_sim)
+            if len(standard_list) != client_num:
+                standard_list.append(logit_sim_sum)
+            else:
+                standard_list[ccix] += logit_sim_sum 
+
+    st_list = [torch.exp(-x/total).item() for x in standard_list]
+    lg_sum = sum(st_list)
+    l_list = [x/lg_sum for x in st_list]
+    # print("l_list: ", l_list)
+    return l_list
+
+
+def weight_calculate_BN_head_lkl(model, data_loader, Specific_adaptors, Specific_heads, loss_fun, client_num, device):
+    kl_loss = nn.KLDivLoss(reduction='none')
+    standard_list = []
+    ttt_model = copy.deepcopy(model)
+    ttt_model.eval()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        output_g = ttt_model(data)
+
+        for ccix in range(client_num):
+            BN_list = Specific_adaptors[ccix]
+            Specific_head = Specific_heads[ccix]
+            Specific_head.eval()
+            for kky in ttt_model.state_dict().keys():
+                if 'bn' in kky:
+                    if 'num_batches_tracked' not in kky:
+                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
+
+            feature_gen = ttt_model.produce_feature(data)
+            output_gen = Specific_head(feature_gen)
+            logit_sim = torch.sum(kl_loss(F.log_softmax(output_gen, dim=1), F.softmax(output_g, dim=1)))
+
+            logit_sim_sum = torch.sum(logit_sim)
+            if len(standard_list) != client_num:
+                standard_list.append(logit_sim)
+            else:
+                standard_list[ccix] += logit_sim 
+
+    st_list = [torch.exp(-x).item()+1e-9 for x in standard_list]
+    lg_sum = sum(st_list)
+    l_list = [x/lg_sum for x in st_list]
+    # print("l_list: ", l_list)
+    return l_list
+
+
 

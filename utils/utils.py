@@ -42,7 +42,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                 models[client_idx].load_state_dict(copy.deepcopy(paggre_models[client_idx].state_dict()))
 
         elif args.mode.lower() == 'peer':
-            if args.version in [63, 64, 67, 68, 69]:
+            if args.version in [63, 64, 67, 68, 69, 76, 81]:
                 for key in server_model.state_dict().keys():
                     if 'bn' not in key:
                         temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
@@ -51,7 +51,29 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                         server_model.state_dict()[key].data.copy_(temp)
                         for client_idx in range(client_num):
                             models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version in [59, 60, 61]:
+            elif args.version in [82]:
+                for key in server_model.state_dict().keys():
+                    if 'bn' not in key:
+                        if 'classifier' not in key:
+                            temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
+                            for client_idx in range(client_num):
+                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
+                            server_model.state_dict()[key].data.copy_(temp)
+                            for client_idx in range(client_num):
+                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+            elif args.version in [83]:
+                for key in server_model.state_dict().keys():
+                    if 'classifier' not in key:
+                        if 'num_batches_tracked' in key:
+                            server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
+                        else:
+                            temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
+                            for client_idx in range(client_num):
+                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
+                            server_model.state_dict()[key].data.copy_(temp)
+                            for client_idx in range(client_num):
+                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+            elif args.version in [59, 60, 61, 72, 73, 74, 75, 77, 78, 79, 80]:
                 for client_idx in range(client_num):
                     weight_list = client_weights[client_idx]
                     for key in server_model.state_dict().keys():
@@ -68,8 +90,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                         server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
                     else:
                         for client_idx in range(client_num):
-                            models[client_idx].state_dict()[key].data.copy_(paggre_models[client_idx].state_dict()[key])
-                
+                            models[client_idx].state_dict()[key].data.copy_(paggre_models[client_idx].state_dict()[key])                
             elif args.version in [3, 4, 6, 16, 9, 10, 13, 14, 21, 22]:
                 for key in server_model.state_dict().keys():
                     if 'num_batches_tracked' in key:
@@ -177,6 +198,10 @@ def test(client_idx, model, p_model, extra_modules, data_loader, loss_fun, devic
     elif args.mode == 'peer':
         if args.version == 27:
             test_loss, test_acc = peer_test_uppper_bound(model, p_model, data_loader, loss_fun, client_idx, device)
+        elif args.version in [70, 76, 81, 82]:
+            test_loss, test_acc = peer_test_lambda(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
+        elif args.version == 71:
+            test_loss, test_acc = peer_test_linear(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
         elif args.version == 30:
             test_loss, test_acc = peer_test_adapt_here(model, p_model, data_loader, loss_fun, client_idx, device)
         elif args.version == 58:
@@ -293,6 +318,81 @@ def peer_test(model, p_model, data_loader, loss_fun, device):
         output_p = p_model(data)
 
         output = output_g.detach()+output_p
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss_g = loss_fun(output_g, target)
+        loss_p = loss_fun(output_p, target)
+        loss_ga += loss_g
+        loss_pa += loss_p
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+
+    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
+    test_acc = [correct/total, correct_g/total, correct_p/total]
+    return test_loss, test_acc
+
+
+def peer_test_lambda(model, p_model, extra_model, data_loader, loss_fun, device):
+    model.eval()
+    p_model.eval()
+    extra_model.eval()
+    loss_all, loss_ga, loss_pa = 0, 0, 0
+    total = 0
+    correct, correct_g, correct_p = 0, 0, 0
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output_g = model(data)
+        output_p = p_model(data)
+
+        lam_p = torch.sigmoid(extra_model(torch.tensor([0], dtype=torch.long).to(device)))
+        lam_g = 1- lam_p
+        output = lam_g * output_g.detach() + lam_p * output_p.detach()
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss_g = loss_fun(output_g, target)
+        loss_p = loss_fun(output_p, target)
+        loss_ga += loss_g
+        loss_pa += loss_p
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+
+    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
+    test_acc = [correct/total, correct_g/total, correct_p/total]
+    return test_loss, test_acc
+
+
+def peer_test_linear(model, p_model, extra_model, data_loader, loss_fun, device):
+    model.eval()
+    p_model.eval()
+    extra_model.eval()
+    loss_all, loss_ga, loss_pa = 0, 0, 0
+    total = 0
+    correct, correct_g, correct_p = 0, 0, 0
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output_g = model(data)
+        output_p = p_model(data)
+
+        com = torch.cat([output_g.detach(), output_p.detach()], dim=1)
+        output = extra_model(com)
         loss = loss_fun(output, target)
         loss_all += loss.item()
         total += target.size(0)

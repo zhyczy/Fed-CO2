@@ -87,7 +87,7 @@ if __name__ == '__main__':
                   dropout = 0.1, emb_dropout = 0.1).to(device)
     elif args.mode == 'peer':
         if args.version in [18, 25, 58, 62, 28, 46, 47, 48, 49, 50, 1, 2, 5, 15, 23, 24, 26, 29, 7, 8, 11, 12, 19, 20, 27, 30, 31, 32, 
-                            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 59, 60, 61, 63, 64]:
+                            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 59, 60, 61, 63, 64, 70, 71, 76, 81, 82, 83]:
             server_model = AlexNet().to(device)
         elif args.version in [3, 4, 6, 16, 9, 10, 13, 14, 21, 22]:
             server_model = AlexNet_adaG().to(device)
@@ -173,17 +173,47 @@ if __name__ == '__main__':
         elif args.version == 65:
             print("Version65: Classifier generalizes on BN")
 
-        elif args.version == 66:
-            print("Version66: V18 + V65")
+        elif args.version == 70:
+            print("Version70: Use validation set to learn lambda")
 
-        elif args.version == 67:
-            print("Version67: V63 and now classifier is only one layer")
+        elif args.version == 71:
+            print("Version71: Use validation set to learn linear combination layer")
 
-        elif args.version == 68:
-            print("version68: V65 + V63")
+        elif args.version == 72:
+            print("Version72: use feature cosine distance to represent domain distance based on different BNs")
 
-        elif args.version == 69:
-            print("Version69: V66 + V63")
+        elif args.version == 73:
+            print("Version73: use logit cosine distance to represent domain distance based on different BNs")
+
+        elif args.version == 74:
+            print("Version74: V72 uses KL distance to replace cosine distance")
+
+        elif args.version == 75:
+            print("Version75: V73 uses KL distance to replace cosine distance")
+
+        elif args.version == 76:
+            print("Version76: V76 uses validation set to learn lambda and G branch is now fedBN")
+
+        elif args.version == 77:
+            print("Version77: V77 V73 and use specific_head")
+
+        elif args.version == 78:
+            print("Version78: V78 V75 and use specific_head")
+
+        elif args.version == 79:
+            print("Version79: V79 upper bound uses other client's p model to calculate collaboration weight")
+
+        elif args.version == 80:
+            print("Version80: V80 approximation uses other client's g model to calculate collaboration weight")
+
+        elif args.version == 81:
+            print("Version81: V81 validation set to learn lambda, G branch is fedBN, P branch is generalized")
+
+        elif args.version == 82:
+            print("Version82: V82 uses validation set to learn lambda and G branch is now fedBN and FedPer")
+
+        elif args.version == 83:
+            print("Version83: V83 G branch is based on FedPer and G branch generalizes")
 
         else:
             definite_version(args.version)
@@ -191,6 +221,16 @@ if __name__ == '__main__':
 
         if args.version == 31:
             personalized_models = [AlexNet_adaptP().to(device) for idx in range(client_num)]
+        elif args.version in [70, 76, 81, 82]:
+            meb = nn.Embedding(num_embeddings=1, embedding_dim=1).to(device)
+            # print(meb.state_dict())
+            meb.state_dict()['weight'].data.copy_(torch.zeros([1], dtype=torch.long))
+            # print(meb.state_dict())
+            extra_modules = [copy.deepcopy(meb) for idx in range(client_num)]
+            personalized_models = [AlexNet().to(device) for idx in range(client_num)]
+        elif args.version == 71:
+            extra_modules = [nn.Linear(20, 10).to(device) for idx in range(client_num)]
+            personalized_models = [AlexNet().to(device) for idx in range(client_num)]
         elif args.version == 43:
             personalized_models = [AlexNet_adaptP_trial().to(device) for idx in range(client_num)]
         elif args.version == 55:
@@ -202,7 +242,7 @@ if __name__ == '__main__':
                 ccc_model.load_state_dict(savepoint['model_{}'.format(client_idx)])
                 extra_modules[client_idx].load_state_dict(ccc_model.state_dict(), strict=False)
             personalized_models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
-        elif args.version in [56, 57, 59, 60, 61]:
+        elif args.version in [56, 57, 59, 60, 61, 72, 73, 74, 75, 77, 78, 79, 80]:
             paggregation_models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
             personalized_models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
         elif args.version in [65, 66, 68, 69]:
@@ -339,7 +379,7 @@ if __name__ == '__main__':
         with torch.no_grad():
             # Aggregation
             if len(weight_dict[0]) != 0:
-                assert args.version in [59, 60, 61]
+                assert args.version in [59, 60, 61, 72, 73, 74, 75, 77, 78, 79, 80]
                 server_model, models, global_prototypes = communication(args, server_model, models, personalized_models, extra_modules, paggregation_models, weight_dict, proto_dict, a_iter)
                 for ccidx in range(client_num):
                     print("Dataset: ", datasets[ccidx], " weight list: ", weight_dict[ccidx])
@@ -352,6 +392,23 @@ if __name__ == '__main__':
                             logfile.write(' Site-{:<10s}| w1: {:.4f} | w2: {:.4f} | w3: {:.4f} | w4: {:.4f}\n'.format(datasets[ccidx], wei_list[0], wei_list[1], wei_list[2], wei_list[3]))
             else:
                 server_model, models, global_prototypes = communication(args, server_model, models, personalized_models, extra_modules, paggregation_models, client_weights, proto_dict, a_iter)
+
+        if args.version in [70, 71, 76, 81, 82]:
+            assert args.mode == 'peer'
+            train_loss, train_acc, _, _ = local_training(models, personalized_models, None, None, None, None, extra_modules, 
+                                        None, None, args, None, val_loaders, None, loss_fun, device, a_iter=a_iter, phase='Valid')
+            
+            if args.version in [70, 76, 81, 82]:
+                for ccidx in range(client_num):
+                    e_model = extra_modules[ccidx]
+                    e_model.eval()
+                    lambda_p = torch.sigmoid(e_model(torch.tensor([0], dtype=torch.long).to(device)))
+                    lambda_g = 1 - lambda_p
+                    print("Dataset: ", datasets[ccidx], " lambda_g: ", lambda_g[0].item(), " lambda_p: ", lambda_p[0].item())
+                    if args.log:
+                        logfile.write(' Site-{:<10s}| lambda_g: {:.4f} | lambda_p: {:.4f}\n'.format(datasets[ccidx], lambda_g[0].item(), lambda_p[0].item()))
+
+        with torch.no_grad():
 
             if args.mode == 'peer':
                 for client_idx, model in enumerate(models):
@@ -374,15 +431,7 @@ if __name__ == '__main__':
             for client_idx, model in enumerate(models):
                 if args.mode in ['peer', 'fedper', 'fedrod']:
                     p_model = personalized_models[client_idx]
-                    # if args.mode == 'peer' :
-                    #     if args.version in [21]:
-                    #         global_prototype = global_prototypes[client_idx]
-                    #     elif args.version not in [22]:
-                    #         global_prototype = None
-                    # else:
-                    #     global_prototype = None
                 else:
-                    # global_prototype = None
                     p_model = None
                 if args.version in [27, 30]:
                     train_loss, train_acc = test(client_idx, model, personalized_models, extra_modules, train_loaders[client_idx], loss_fun, device, args, hnet, global_prototype, flog=True)
@@ -547,10 +596,9 @@ if __name__ == '__main__':
                 
                 elif args.mode in ['peer', 'fedper', 'fedrod']:
                     if args.mode.lower() == 'peer':
-                        if args.version in [59, 60, 61, 63, 64, 65, 66, 67, 68, 69]:
+                        if args.version in [59, 60, 61, 63, 83, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 77, 78, 79, 80]:
                             if args.dataset == 'domainnet':
                                 torch.save({
-                                    'server_model': server_model.state_dict(),
                                     'model_0': models[0].state_dict(),
                                     'model_1': models[1].state_dict(),
                                     'model_2': models[2].state_dict(),
@@ -574,6 +622,84 @@ if __name__ == '__main__':
                                     'model_1': models[1].state_dict(),
                                     'model_2': models[2].state_dict(),
                                     'model_3': models[3].state_dict(),
+                                    'p_model_0': personalized_models[0].state_dict(),
+                                    'p_model_1': personalized_models[1].state_dict(),
+                                    'p_model_2': personalized_models[2].state_dict(),
+                                    'p_model_3': personalized_models[3].state_dict(),
+                                    'best_epoch': best_epoch,
+                                    'best_acc': best_acc,
+                                    'a_iter': a_iter
+                                }, SAVE_PATH)
+                        elif args.version in [70, 71]:
+                            if args.dataset == 'domainnet':
+                                torch.save({
+                                    'server_model': server_model.state_dict(),
+                                    'emodel_0': extra_modules[0].state_dict(),
+                                    'emodel_1': extra_modules[1].state_dict(),
+                                    'emodel_2': extra_modules[2].state_dict(),
+                                    'emodel_3': extra_modules[3].state_dict(),
+                                    'emodel_4': extra_modules[4].state_dict(),
+                                    'emodel_5': extra_modules[5].state_dict(),
+                                    'p_model_0': personalized_models[0].state_dict(),
+                                    'p_model_1': personalized_models[1].state_dict(),
+                                    'p_model_2': personalized_models[2].state_dict(),
+                                    'p_model_3': personalized_models[3].state_dict(),
+                                    'p_model_4': personalized_models[4].state_dict(),
+                                    'p_model_5': personalized_models[5].state_dict(),
+                                    'best_epoch': best_epoch,
+                                    'best_acc': best_acc,
+                                    'a_iter': a_iter
+                                }, SAVE_PATH)
+                            elif args.dataset == 'office_home':
+                                torch.save({
+                                    'server_model': server_model.state_dict(),
+                                    'emodel_0': extra_modules[0].state_dict(),
+                                    'emodel_1': extra_modules[1].state_dict(),
+                                    'emodel_2': extra_modules[2].state_dict(),
+                                    'emodel_3': extra_modules[3].state_dict(),
+                                    'p_model_0': personalized_models[0].state_dict(),
+                                    'p_model_1': personalized_models[1].state_dict(),
+                                    'p_model_2': personalized_models[2].state_dict(),
+                                    'p_model_3': personalized_models[3].state_dict(),
+                                    'best_epoch': best_epoch,
+                                    'best_acc': best_acc,
+                                    'a_iter': a_iter
+                                }, SAVE_PATH)
+                        elif args.version in [76, 81, 82]:
+                            if args.dataset == 'domainnet':
+                                torch.save({
+                                    'model_0': models[0].state_dict(),
+                                    'model_1': models[1].state_dict(),
+                                    'model_2': models[2].state_dict(),
+                                    'model_3': models[3].state_dict(),
+                                    'model_4': models[4].state_dict(),
+                                    'model_5': models[5].state_dict(),
+                                    'emodel_0': extra_modules[0].state_dict(),
+                                    'emodel_1': extra_modules[1].state_dict(),
+                                    'emodel_2': extra_modules[2].state_dict(),
+                                    'emodel_3': extra_modules[3].state_dict(),
+                                    'emodel_4': extra_modules[4].state_dict(),
+                                    'emodel_5': extra_modules[5].state_dict(),
+                                    'p_model_0': personalized_models[0].state_dict(),
+                                    'p_model_1': personalized_models[1].state_dict(),
+                                    'p_model_2': personalized_models[2].state_dict(),
+                                    'p_model_3': personalized_models[3].state_dict(),
+                                    'p_model_4': personalized_models[4].state_dict(),
+                                    'p_model_5': personalized_models[5].state_dict(),
+                                    'best_epoch': best_epoch,
+                                    'best_acc': best_acc,
+                                    'a_iter': a_iter
+                                }, SAVE_PATH)
+                            elif args.dataset == 'office_home':
+                                torch.save({
+                                    'model_0': models[0].state_dict(),
+                                    'model_1': models[1].state_dict(),
+                                    'model_2': models[2].state_dict(),
+                                    'model_3': models[3].state_dict(),
+                                    'emodel_0': extra_modules[0].state_dict(),
+                                    'emodel_1': extra_modules[1].state_dict(),
+                                    'emodel_2': extra_modules[2].state_dict(),
+                                    'emodel_3': extra_modules[3].state_dict(),
                                     'p_model_0': personalized_models[0].state_dict(),
                                     'p_model_1': personalized_models[1].state_dict(),
                                     'p_model_2': personalized_models[2].state_dict(),
