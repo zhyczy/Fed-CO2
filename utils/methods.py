@@ -93,7 +93,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             if args.version in [17, 61, 64]:
                 train_loss, train_acc = train_v0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, device)
 
-            elif args.version in [18, 27, 58, 59, 60, 63, 83]:
+            elif args.version in [18, 27, 58, 59, 60, 63, 83, 84]:
                 train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
@@ -117,7 +117,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_bn_adap_gen_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, client_idx, device)
 
-            elif args.version in [70, 76, 82]:
+            elif args.version in [70, 76, 82, 86]:
                 if phase == 'Train':
                     train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
@@ -135,7 +135,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                     train_loss, train_acc = train_valid_linear(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
                                                   a_optimizer, loss_fun, client_idx, device)
 
-            elif args.version == 81:
+            elif args.version in [81, 85, 87]:
                 if phase == 'Train':
                     train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
@@ -307,7 +307,6 @@ def train_valid_lambda(model, p_model, lab_para, valid_loader, a_optimizer, loss
     total = 0
     correct = 0
 
-    # print("client: ", client_idx)
     for data, target in valid_loader:
         data = data.to(device)
         target = target.to(device)
@@ -1060,6 +1059,4 @@ def weight_calculate_BN_head_lkl(model, data_loader, Specific_adaptors, Specific
     l_list = [x/lg_sum for x in st_list]
     # print("l_list: ", l_list)
     return l_list
-
-
 

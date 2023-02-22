@@ -51,7 +51,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                         server_model.state_dict()[key].data.copy_(temp)
                         for client_idx in range(client_num):
                             models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version in [82]:
+            elif args.version in [82, 84, 85]:
                 for key in server_model.state_dict().keys():
                     if 'bn' not in key:
                         if 'classifier' not in key:
@@ -61,7 +61,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                             server_model.state_dict()[key].data.copy_(temp)
                             for client_idx in range(client_num):
                                 models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version in [83]:
+            elif args.version in [83, 86, 87]:
                 for key in server_model.state_dict().keys():
                     if 'classifier' not in key:
                         if 'num_batches_tracked' in key:
@@ -198,7 +198,7 @@ def test(client_idx, model, p_model, extra_modules, data_loader, loss_fun, devic
     elif args.mode == 'peer':
         if args.version == 27:
             test_loss, test_acc = peer_test_uppper_bound(model, p_model, data_loader, loss_fun, client_idx, device)
-        elif args.version in [70, 76, 81, 82]:
+        elif args.version in [70, 76, 81, 82, 85, 86, 87]:
             test_loss, test_acc = peer_test_lambda(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
         elif args.version == 71:
             test_loss, test_acc = peer_test_linear(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)

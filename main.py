@@ -87,7 +87,7 @@ if __name__ == '__main__':
                   dropout = 0.1, emb_dropout = 0.1).to(device)
     elif args.mode == 'peer':
         if args.version in [18, 25, 58, 62, 28, 46, 47, 48, 49, 50, 1, 2, 5, 15, 23, 24, 26, 29, 7, 8, 11, 12, 19, 20, 27, 30, 31, 32, 
-                            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 59, 60, 61, 63, 64, 70, 71, 76, 81, 82, 83]:
+                            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 59, 60, 61, 63, 64, 70, 71, 76, 81, 82, 83, 84, 85, 86, 87]:
             server_model = AlexNet().to(device)
         elif args.version in [3, 4, 6, 16, 9, 10, 13, 14, 21, 22]:
             server_model = AlexNet_adaG().to(device)
@@ -170,26 +170,8 @@ if __name__ == '__main__':
         elif args.version == 64:
             print("Version64: comparison version with V63 with no generalized branch")
 
-        elif args.version == 65:
-            print("Version65: Classifier generalizes on BN")
-
         elif args.version == 70:
             print("Version70: Use validation set to learn lambda")
-
-        elif args.version == 71:
-            print("Version71: Use validation set to learn linear combination layer")
-
-        elif args.version == 72:
-            print("Version72: use feature cosine distance to represent domain distance based on different BNs")
-
-        elif args.version == 73:
-            print("Version73: use logit cosine distance to represent domain distance based on different BNs")
-
-        elif args.version == 74:
-            print("Version74: V72 uses KL distance to replace cosine distance")
-
-        elif args.version == 75:
-            print("Version75: V73 uses KL distance to replace cosine distance")
 
         elif args.version == 76:
             print("Version76: V76 uses validation set to learn lambda and G branch is now fedBN")
@@ -215,13 +197,25 @@ if __name__ == '__main__':
         elif args.version == 83:
             print("Version83: V83 G branch is based on FedPer and G branch generalizes")
 
+        elif args.version == 84:
+            print("Version84: V84 G branch is based on FedPer and FedBN, G branch generalizes")
+
+        elif args.version == 85:
+            print("Version85: V82 and P branch is generalized")
+
+        elif args.version == 86:
+            print("Version86: V86 uses validation set to learn lambda and G is FedPer")
+
+        elif args.version == 87:
+            print("Version87: V87 uses validation set to learn lambda and G is FedPer, P generalizes")
+
         else:
             definite_version(args.version)
 
 
         if args.version == 31:
             personalized_models = [AlexNet_adaptP().to(device) for idx in range(client_num)]
-        elif args.version in [70, 76, 81, 82]:
+        elif args.version in [70, 76, 81, 82, 85, 86, 87]:
             meb = nn.Embedding(num_embeddings=1, embedding_dim=1).to(device)
             # print(meb.state_dict())
             meb.state_dict()['weight'].data.copy_(torch.zeros([1], dtype=torch.long))
@@ -393,12 +387,12 @@ if __name__ == '__main__':
             else:
                 server_model, models, global_prototypes = communication(args, server_model, models, personalized_models, extra_modules, paggregation_models, client_weights, proto_dict, a_iter)
 
-        if args.version in [70, 71, 76, 81, 82]:
+        if args.version in [70, 71, 76, 81, 82, 85, 86, 87]:
             assert args.mode == 'peer'
             train_loss, train_acc, _, _ = local_training(models, personalized_models, None, None, None, None, extra_modules, 
                                         None, None, args, None, val_loaders, None, loss_fun, device, a_iter=a_iter, phase='Valid')
             
-            if args.version in [70, 76, 81, 82]:
+            if args.version != 71:
                 for ccidx in range(client_num):
                     e_model = extra_modules[ccidx]
                     e_model.eval()
@@ -596,7 +590,7 @@ if __name__ == '__main__':
                 
                 elif args.mode in ['peer', 'fedper', 'fedrod']:
                     if args.mode.lower() == 'peer':
-                        if args.version in [59, 60, 61, 63, 83, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 77, 78, 79, 80]:
+                        if args.version in [59, 60, 61, 63, 83, 84, 64, 65, 66, 67, 68, 69, 72, 73, 74, 75, 77, 78, 79, 80]:
                             if args.dataset == 'domainnet':
                                 torch.save({
                                     'model_0': models[0].state_dict(),
@@ -633,7 +627,6 @@ if __name__ == '__main__':
                         elif args.version in [70, 71]:
                             if args.dataset == 'domainnet':
                                 torch.save({
-                                    'server_model': server_model.state_dict(),
                                     'emodel_0': extra_modules[0].state_dict(),
                                     'emodel_1': extra_modules[1].state_dict(),
                                     'emodel_2': extra_modules[2].state_dict(),
@@ -665,7 +658,7 @@ if __name__ == '__main__':
                                     'best_acc': best_acc,
                                     'a_iter': a_iter
                                 }, SAVE_PATH)
-                        elif args.version in [76, 81, 82]:
+                        elif args.version in [76, 81, 82, 85, 86, 87]:
                             if args.dataset == 'domainnet':
                                 torch.save({
                                     'model_0': models[0].state_dict(),
