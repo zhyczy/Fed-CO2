@@ -53,6 +53,8 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
         for client_idx in range(client_num):
             if args.version in [51, 52, 53, 54, 67, 66, 69, 72, 73, 74, 75, 77, 78, 79, 80]:
                 Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
+            elif args.version in [88, 89]:
+                Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx])
             elif args.version == 56:
                 Specific_head[client_idx] = copy.deepcopy(paggregation_models[client_idx].head)
             elif args.version == 57:
@@ -143,6 +145,14 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                     a_optimizer = optim.SGD(params=Extra_modules[client_idx].parameters(), lr=1)
                     train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
                                                   a_optimizer, loss_fun, client_idx, device)
+
+            elif args.version == 88:
+                train_loss, train_acc = train_spe(model, personalized_models[client_idx], train_loaders[client_idx], 
+                                                  optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, device)
+
+            elif args.version == 89:
+                train_loss, train_acc = train_gen_spe(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
             else:
                 train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], Extra_modules, paggregation_models, train_loaders[client_idx], test_loaders[client_idx], 
@@ -256,6 +266,36 @@ def train_v0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss
     return loss_all / len(data_loader), correct/total
 
 
+def train_spe(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, device):
+    model.train()
+    p_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        optimizer.zero_grad()
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        loss = loss_g(output_g, target)
+        loss.backward()
+        optimizer.step()
+
+        output_p = p_model(feature_g.detach())
+        loss_p = loss_fun(output_p, target)
+        p_optimizer.zero_grad()
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+    return loss_all / len(data_loader), correct/total
+
+
 def train_gen0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
     client_num = len(Specific_heads.keys())
     assert client_num != 0
@@ -272,6 +312,48 @@ def train_gen0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, lo
         output_g = model.classifier(feature_g)
         feature_p = p_model.produce_feature(data)
         output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
+                output_gen = Spe_classifier(feature_g)
+                part2 += loss_g(output_gen, target)
+        loss = part1 + part2
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def train_gen_spe(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    model.train()
+    p_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        output_p = p_model(feature_g.detach())
 
         optimizer.zero_grad()
         part1 = loss_g(output_g, target)
@@ -799,6 +881,7 @@ def train_COPA(model, Specific_heads, data_loader, optimizer, loss_fun, client_i
         for idxx in range(client_num):
             if idxx != client_idx:
                 Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
                 output_gen = Spe_classifier(local_feature)
                 part2 += loss_fun(output_gen, target)
         loss = part1 + part2

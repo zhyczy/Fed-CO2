@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def others_test(version, model, p_model, extra_modules, data_loader, loss_fun, global_prototype, device, flog):
     return
 
@@ -511,5 +514,33 @@ def show_dictionary(logfile, dictionary, a_iter, mode='Loss', data='domainnet', 
         else:
             s1 += 'Site-{:<10s} {:<10s}:{:.4f}'.format(data_name_list[kky], mode, dictionary[kky])
     print(s1)
+
+
+def log_write_running_dictionary(logfile, dictionary, data='domainnet'):
+    dataset = {'domainnet':['Clipart', 'Infograph', 'Painting', 'Quickdraw', 'Real', 'Sketch'],
+               'office_home':['Amazon', 'Caltech', 'DSLR', 'Webcam']}
+    data_name_list = dataset[data]
+    key_list = list(dictionary.keys())
+    for ky in range(len(dictionary.keys())):
+        kky = key_list[ky]
+        running_record = dictionary[kky]
+        running_avg = np.mean(running_record)
+        running_var = np.var(running_record)
+        logfile.write('Site-{:<10s} | T1: {:.4f} | T2: {:.4f} | T3: {:.4f} | T4: {:.4f} | T5: {:.4f}'.format(data_name_list[kky], running_record[0], running_record[1], running_record[2], running_record[3], running_record[4]))
+        logfile.write('Site-{:<10s} | Avg: {:.4f} | Var: {:.4f}'.format(data_name_list[kky], running_avg, running_var))
+
+
+def show_running_dictionary(dictionary, data='domainnet'):
+    dataset = {'domainnet':['Clipart', 'Infograph', 'Painting', 'Quickdraw', 'Real', 'Sketch'],
+               'office_home':['Amazon', 'Caltech', 'DSLR', 'Webcam']}
+    data_name_list = dataset[data]
+    key_list = list(dictionary.keys())
+    for ky in range(len(dictionary.keys())):
+        kky = key_list[ky]
+        running_record = dictionary[kky]
+        running_avg = np.mean(running_record)
+        running_var = np.var(running_record)
+        print('Site-{:<10s} | T1: {:.4f} | T2: {:.4f} | T3: {:.4f} | T4: {:.4f} | T5: {:.4f}'.format(data_name_list[kky], running_record[0], running_record[1], running_record[2], running_record[3], running_record[4]))
+        print('Site-{:<10s} | Avg: {:.4f} | Var: {:.4f}'.format(data_name_list[kky], running_avg, running_var))
 
     

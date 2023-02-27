@@ -162,7 +162,7 @@ def definite_version(version):
         print("Check BN in version18, it seems we need to set spe_classifier eval() to keep the running mean and running var right")
         print("Now V18 has been modified to be the same as V62, add spe_classifier.eval()")
 
-    elif args.version == 65:
+    elif version == 65:
         print("Version65: Classifier generalizes on BN")
 
     elif version == 66:
@@ -177,17 +177,17 @@ def definite_version(version):
     elif version == 69:
         print("Version69: V66 + V63")
 
-    elif args.version == 71:
+    elif version == 71:
         print("Version71: Use validation set to learn linear combination layer")
 
-    elif args.version == 72:
+    elif version == 72:
         print("Version72: use feature cosine distance to represent domain distance based on different BNs")
 
-    elif args.version == 73:
+    elif version == 73:
         print("Version73: use logit cosine distance to represent domain distance based on different BNs")
 
-    elif args.version == 74:
+    elif version == 74:
         print("Version74: V72 uses KL distance to replace cosine distance")
 
-    elif args.version == 75:
+    elif version == 75:
         print("Version75: V73 uses KL distance to replace cosine distance")

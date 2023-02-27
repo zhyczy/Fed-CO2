@@ -198,6 +198,8 @@ def test(client_idx, model, p_model, extra_modules, data_loader, loss_fun, devic
     elif args.mode == 'peer':
         if args.version == 27:
             test_loss, test_acc = peer_test_uppper_bound(model, p_model, data_loader, loss_fun, client_idx, device)
+        elif args.version in [88, 89]:
+            test_loss, test_acc = peer_spe_test(model, p_model, data_loader, loss_fun, device)
         elif args.version in [70, 76, 81, 82, 85, 86, 87]:
             test_loss, test_acc = peer_test_lambda(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
         elif args.version == 71:
@@ -316,6 +318,42 @@ def peer_test(model, p_model, data_loader, loss_fun, device):
         target = target.to(device)
         output_g = model(data)
         output_p = p_model(data)
+
+        output = output_g.detach()+output_p
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss_g = loss_fun(output_g, target)
+        loss_p = loss_fun(output_p, target)
+        loss_ga += loss_g
+        loss_pa += loss_p
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+
+    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
+    test_acc = [correct/total, correct_g/total, correct_p/total]
+    return test_loss, test_acc
+
+
+def peer_spe_test(model, p_model, data_loader, loss_fun, device):
+    model.eval()
+    p_model.eval()
+    loss_all, loss_ga, loss_pa = 0, 0, 0
+    total = 0
+    correct, correct_g, correct_p = 0, 0, 0
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        output_p = p_model(feature_g.detach())
 
         output = output_g.detach()+output_p
         loss = loss_fun(output, target)

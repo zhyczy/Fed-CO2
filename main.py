@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 import pickle as pkl
-from utils.data_utils import DomainNetDataset, prepare_data
+from utils.data_utils import prepare_data_domainNet, prepare_data_officeHome
 from utils.methods import local_training
 from utils.utils import  communication, test, set_client_weight, visualize, log_write_dictionary, show_dictionary, visualize_combination, adapt_lambda
 from utils.func_v import definite_version
@@ -50,8 +50,11 @@ if __name__ == '__main__':
 
     if args.dataset == 'domainnet':
         exp_folder = 'fed_domainnet'
+        train_loaders, val_loaders, test_loaders = prepare_data_domainNet(args)
     elif args.dataset == 'office_home':
         exp_folder = 'fed_office'
+        train_loaders, val_loaders, test_loaders = prepare_data_officeHome(args)
+
 
     args.save_path = os.path.join(args.save_path, exp_folder)
     if not os.path.exists(args.save_path):
@@ -76,7 +79,7 @@ if __name__ == '__main__':
         logfile.write('    batch: {}\n'.format(args.batch))
         logfile.write('    iters: {}\n'.format(args.iters))
     
-    train_loaders, val_loaders, test_loaders = prepare_data(args)
+    # train_loaders, val_loaders, test_loaders = prepare_data(args)
 
     
     # setup model
@@ -87,7 +90,8 @@ if __name__ == '__main__':
                   dropout = 0.1, emb_dropout = 0.1).to(device)
     elif args.mode == 'peer':
         if args.version in [18, 25, 58, 62, 28, 46, 47, 48, 49, 50, 1, 2, 5, 15, 23, 24, 26, 29, 7, 8, 11, 12, 19, 20, 27, 30, 31, 32, 
-                            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 59, 60, 61, 63, 64, 70, 71, 76, 81, 82, 83, 84, 85, 86, 87]:
+                            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 59, 60, 61, 63, 64, 70, 71, 76, 81, 82, 83, 84, 85, 86,
+                            87, 88, 89]:
             server_model = AlexNet().to(device)
         elif args.version in [3, 4, 6, 16, 9, 10, 13, 14, 21, 22]:
             server_model = AlexNet_adaG().to(device)
@@ -209,12 +213,20 @@ if __name__ == '__main__':
         elif args.version == 87:
             print("Version87: V87 uses validation set to learn lambda and G is FedPer, P generalizes")
 
+        elif args.version == 88:
+            print("Version88: V88 P branch shares feature extractor with G branch")
+
+        elif args.version == 89:
+            print("Version89: V89 P branch shares feature extractor with G branch, G branch generalizes")
+
         else:
             definite_version(args.version)
 
 
         if args.version == 31:
             personalized_models = [AlexNet_adaptP().to(device) for idx in range(client_num)]
+        elif args.version in [88, 89]:
+            personalized_models = [P_Head().to(device) for idx in range(client_num)]
         elif args.version in [70, 76, 81, 82, 85, 86, 87]:
             meb = nn.Embedding(num_embeddings=1, embedding_dim=1).to(device)
             # print(meb.state_dict())
