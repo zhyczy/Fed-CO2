@@ -1,5 +1,5 @@
 import sys, os
-from utils.utils import euclidean_dist
+from utils.utils import euclidean_dist, softmax_sharp
 import numpy as np
 import math
 import copy
@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from collections import OrderedDict, defaultdict
-from utils.func import *
+from utils.func import others_train
 
 
 def local_training(models, personalized_models, paggregation_models, hnet, server_model, global_prototypes, Extra_modules, valid_onehot, his_weight, args, train_loaders, test_loaders, optimizers, loss_fun, device, a_iter=0, phase='Train'):
@@ -45,35 +45,92 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
         for p, g in zip(hnet.parameters(), grads_update):
             p.grad = g
         h_optimizer.step()
-        return train_loss, train_acc
+        return train_loss, train_acc, proto_dict, client_weight
 
     elif args.mode == 'peer':
         Specific_head = {}
         Specific_adaptor = {}
-        for client_idx in range(client_num):
-            if args.version in [51, 52, 53, 54, 67, 66, 69, 72, 73, 74, 75, 77, 78, 79, 80]:
-                Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
-            elif args.version in [88, 89]:
-                Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx])
-            elif args.version == 56:
-                Specific_head[client_idx] = copy.deepcopy(paggregation_models[client_idx].head)
-            elif args.version == 57:
-                Specific_head[client_idx] = [copy.deepcopy(paggregation_models[client_idx].head), copy.deepcopy(personalized_models[client_idx].head)]
-            else:
+
+        if args.version not in [1, 2, 6, 17, 24, 26, 21, 27, 29, 30, 31, 35, 36, 
+                                61, 62, 64, 65, 66, 67, 68, 71, 72, 73, 74, 75,
+                                77, 78, 79, 80]:
+            for client_idx in range(client_num):
                 Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].classifier)
-        if args.version in [7, 8, 19, 20, 40, 41, 42]:
+
+        if args.version in [21, 27, 29, 30, 31]:
+            hnet.train()
+            h_optimizer = optim.SGD(params=hnet.parameters(), lr=args.lr)
+            criterion_ba = nn.CrossEntropyLoss().to(device)
+            arr = np.arange(client_num)
+            if args.version in [30, 31]:
+                weights, g_weights = hnet(torch.tensor([arr], dtype=torch.long).to(device), False)
+            else:
+                weights = hnet(torch.tensor([arr], dtype=torch.long).to(device), False)
+            if args.version in [29, 31]:
+                for client_idx in range(client_num):
+                    Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
+            else:
+                for client_idx in range(client_num):
+                    Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
+                    Specific_head[client_idx].load_state_dict(weights[client_idx], strict=False)
+
+            if args.version in [30, 31]:
+                for client_idx, p_model in enumerate(personalized_models):
+                    private_params = weights[client_idx]
+                    invar_params = g_weights[client_idx]
+                    p_optimizer = optim.SGD(params=personalized_models[client_idx].parameters(), lr=args.lr)
+                    p_model.load_state_dict(private_params, strict=False)
+                    models[client_idx].load_state_dict(invar_params, strict=False)
+                    train_loss, train_acc = train_gen0_head(models[client_idx], p_model, train_loaders[client_idx], optimizers[client_idx], 
+                                                      p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+
+            else:
+                for client_idx, p_model in enumerate(personalized_models):
+                    private_params = weights[client_idx]
+                    p_optimizer = optim.SGD(params=personalized_models[client_idx].parameters(), lr=args.lr)
+                    p_model.load_state_dict(private_params, strict=False)
+                    train_loss, train_acc = train_gen0_head(models[client_idx], p_model, train_loaders[client_idx], optimizers[client_idx], 
+                                                      p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+
             for client_idx in range(client_num):
-                Specific_adaptor[client_idx] = copy.deepcopy(personalized_models[client_idx].f_adaptor)
-        elif args.version in [9, 10, 21, 22]:
-            for client_idx in range(client_num):
-                Specific_adaptor[client_idx] = [copy.deepcopy(models[client_idx].adap3.state_dict()), copy.deepcopy(models[client_idx].adap4.state_dict()), copy.deepcopy(models[client_idx].adap5.state_dict())]
-        elif args.version in [65, 66, 68, 69]:
-            for client_idx in range(client_num):
-                Specific_adaptor[client_idx] = {}
-                for kky in personalized_models[client_idx].state_dict().keys():
-                    if 'bn' in kky:
-                        if 'num_batches_tracked' not in kky:
-                            Specific_adaptor[client_idx][kky] = copy.deepcopy(personalized_models[client_idx].state_dict()[kky])
+                final_state = personalized_models[client_idx].state_dict()
+                node_weights = weights[client_idx]
+                inner_state = OrderedDict({k: tensor.data for k, tensor in node_weights.items()})
+                delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in node_weights.keys()})
+                hnet_grads = torch.autograd.grad(
+                    list(node_weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()), retain_graph=True, allow_unused=True
+                )
+
+                if client_idx == 0:
+                    grads_update = [1/client_num  for x in hnet_grads]
+                else:
+                    for g in range(len(hnet_grads)):
+                        if hnet_grads[g] == None:
+                            continue
+                        else:
+                            grads_update[g] += 1/client_num * hnet_grads[g]
+
+            if args.version in [30, 31]:
+                for client_idx in range(client_num):
+                    final_state = models[client_idx].state_dict()
+                    node_weights = g_weights[client_idx]
+                    inner_state = OrderedDict({k: tensor.data for k, tensor in node_weights.items()})
+                    delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in node_weights.keys()})
+                    hnet_grads = torch.autograd.grad(
+                        list(node_weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()), retain_graph=True, allow_unused=True
+                    )
+
+                    for g in range(len(hnet_grads)):
+                        if hnet_grads[g] == None:
+                            continue
+                        else:
+                            grads_update[g] += 1/client_num * hnet_grads[g]
+
+            h_optimizer.zero_grad()
+            for p, g in zip(hnet.parameters(), grads_update):
+                p.grad = g
+            h_optimizer.step()
+            return train_loss, train_acc, proto_dict, client_weight
 
     elif args.mode == 'COPA':
         Specific_head = {}
@@ -92,14 +149,19 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             p_optimizer = optim.SGD(params=personalized_models[client_idx].parameters(), lr=args.lr)
             criterion_ba = nn.CrossEntropyLoss().to(device)
     
-            if args.version in [17, 61, 64]:
-                train_loss, train_acc = train_v0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, device)
+            if args.version in [17, 71, 72]:
+                train_loss, train_acc = train_v0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                    p_optimizer, loss_fun, criterion_ba, device)
 
-            elif args.version in [18, 27, 58, 59, 60, 63, 83, 84]:
+            elif args.version in [18, 63, 32, 39, 40, 41, 16, 19, 58, 59, 60]:
                 train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
-            elif args.version == 25:
+            elif args.version in [69, 82, 84]:
+                train_loss, train_acc = train_gen_p(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+
+            elif args.version in [25, 83, 85]:
                 train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
@@ -107,19 +169,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                           p_optimizer, loss_fun, criterion_ba, Extra_modules, client_idx, device)
 
-            elif args.version in [52, 67, 72, 73, 74, 75, 77, 78, 79, 80]:
-                train_loss, train_acc = train_gen0_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-
-            elif args.version in [65, 68]:
-                train_loss, train_acc = train_bn_adap_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_adaptor, client_idx, device)
-
-            elif args.version in [66, 69]:
-                train_loss, train_acc = train_bn_adap_gen_head(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, client_idx, device)
-
-            elif args.version in [70, 76, 82, 86]:
+            elif args.version in [70, 76, 33]:
                 if phase == 'Train':
                     train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
@@ -128,16 +178,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                     train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
                                                   a_optimizer, loss_fun, client_idx, device)
 
-            elif args.version == 71:
-                if phase == 'Train':
-                    train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-                elif phase == 'Valid':
-                    a_optimizer = optim.SGD(params=Extra_modules[client_idx].parameters(), lr=args.lr)
-                    train_loss, train_acc = train_valid_linear(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
-                                                  a_optimizer, loss_fun, client_idx, device)
-
-            elif args.version in [81, 85, 87]:
+            elif args.version in [81, 34, 15]:
                 if phase == 'Train':
                     train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
@@ -146,18 +187,77 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                     train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
                                                   a_optimizer, loss_fun, client_idx, device)
 
-            elif args.version == 88:
-                train_loss, train_acc = train_spe(model, personalized_models[client_idx], train_loaders[client_idx], 
-                                                  optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, device)
+            elif args.version == 42:
+                if phase == 'Train':
+                    train_loss, train_acc = train_gen_kl_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
+                elif phase == 'Valid':
+                    a_optimizer = optim.SGD(params=Extra_modules[client_idx].parameters(), lr=1)
+                    train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
+                                                  a_optimizer, loss_fun, client_idx, device)
 
-            elif args.version == 89:
-                train_loss, train_acc = train_gen_spe(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+            elif args.version in [47, 49, 55, 57]:
+                if phase == 'Train':
+                    train_loss, train_acc = train_gen_full_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
+                elif phase == 'Valid':
+                    a_optimizer = optim.SGD(params=Extra_modules[client_idx].parameters(), lr=1)
+                    train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
+                                                  a_optimizer, loss_fun, client_idx, device)
+
+            elif args.version in [24, 26, 35, 36, 45, 14, 61, 62, 64, 65]:
+                train_loss, train_acc = train(model, train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
+
+            elif args.version in [37, 38]:
+                train_loss, train_acc = train_gen_kl_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
+
+            elif args.version == 43:
+                train_loss, train_acc = train_gen_full_kl_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
+
+            elif args.version == 44:
+                train_loss, train_acc = train_gen_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
+
+            elif args.version in [46, 48, 54, 56]:
+                train_loss, train_acc = train_gen_full_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
+
+            elif args.version in [66, 74, 78]:
+                train_loss, train_acc = train_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, a_iter, device)
+
+            elif args.version in [67, 75, 79]:
+                train_loss, train_acc = train_kl_g_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, a_iter, device)
+
+            elif args.version in [68, 77, 80]:
+                train_loss, train_acc = train_kl_p_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, a_iter, device)
+
+            elif args.version == 73:
+                if phase == 'Train':
+                    train_loss, train_acc = train_v0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                    p_optimizer, loss_fun, criterion_ba, device)
+                elif phase == 'Valid':
+                    a_optimizer = optim.SGD(params=Extra_modules[client_idx].parameters(), lr=1)
+                    train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
+                                                  a_optimizer, loss_fun, client_idx, device)
+
+            elif args.version in [86, 88]:
+                train_loss, train_acc = train_gen_full_kl_g_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
+
+            elif args.version in [87, 89]:
+                train_loss, train_acc = train_gen_full_kl_p_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
+
 
             else:
-                train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], Extra_modules, paggregation_models, train_loaders[client_idx], test_loaders[client_idx], 
-                                        optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, valid_onehot[client_idx], 
-                                        client_idx, device, args, a_iter, phase)
+                train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], Extra_modules, paggregation_models, train_loaders[client_idx], 
+                                        test_loaders[client_idx], optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, 
+                                        valid_onehot[client_idx], client_idx, device, args, a_iter, phase)
 
         elif args.mode == 'fedper':
             private_params = personalized_models[client_idx].state_dict()
@@ -184,57 +284,682 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             train_loss, train_acc = train(model, train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
 
     if args.mode == 'peer':
-        if args.version in [59, 60, 61, 79, 80]:
-            with torch.no_grad():
-                if args.version in [59, 60, 61]:
-                    for client_idx, model in enumerate(models):
-                        client_weight[client_idx] = weight_calculate(models, test_loaders[client_idx], loss_fun, client_num, device)
-                elif args.version == 79:
-                    for client_idx, model in enumerate(personalized_models):
-                        client_weight[client_idx] = weight_calculate(personalized_models, train_loaders[client_idx], loss_fun, client_num, device)
-                elif args.version == 80:
-                    for client_idx, model in enumerate(personalized_models):
-                        client_weight[client_idx] = weight_calculate(models, train_loaders[client_idx], loss_fun, client_num, device)
-        elif args.version in [72, 73, 74, 75]:
-            Specific_adaptor = {}
-            with torch.no_grad():
-                for client_idx in range(client_num):
-                    Specific_adaptor[client_idx] = {}
-                    for kky in personalized_models[client_idx].state_dict().keys():
-                        if 'bn' in kky:
-                            if 'num_batches_tracked' not in kky:
-                                Specific_adaptor[client_idx][kky] = copy.deepcopy(personalized_models[client_idx].state_dict()[kky])
-                if args.version == 72:
-                    for client_idx, model in enumerate(models):
-                        client_weight[client_idx] = weight_calculate_BN_fcos(model, train_loaders[client_idx], Specific_adaptor, loss_fun, client_num, device)
-                elif args.version == 73:
-                    for client_idx, model in enumerate(models):
-                        client_weight[client_idx] = weight_calculate_BN_lcos(model, train_loaders[client_idx], Specific_adaptor, loss_fun, client_num, device)
-                elif args.version == 74:
-                    for client_idx, model in enumerate(models):
-                        client_weight[client_idx] = weight_calculate_BN_fkl(model, train_loaders[client_idx], Specific_adaptor, loss_fun, client_num, device)
-                elif args.version == 75:
-                    for client_idx, model in enumerate(models):
-                        client_weight[client_idx] = weight_calculate_BN_lkl(model, train_loaders[client_idx], Specific_adaptor, loss_fun, client_num, device)
-        elif args.version in [77, 78]:
-            Specific_adaptor = {}
-            Specific_head = {}
-            with torch.no_grad():
-                for client_idx in range(client_num):
-                    Specific_adaptor[client_idx] = {}
-                    for kky in personalized_models[client_idx].state_dict().keys():
-                        if 'bn' in kky:
-                            if 'num_batches_tracked' not in kky:
-                                Specific_adaptor[client_idx][kky] = copy.deepcopy(personalized_models[client_idx].state_dict()[kky])
-                    Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
-                if args.version == 77:
-                    for client_idx, model in enumerate(models):
-                        client_weight[client_idx] = weight_calculate_BN_head_lcos(model, train_loaders[client_idx], Specific_adaptor, Specific_head, loss_fun, client_num, device)
-                elif args.version == 78:
-                    for client_idx, model in enumerate(models):
-                        client_weight[client_idx] = weight_calculate_BN_head_lkl(model, train_loaders[client_idx], Specific_adaptor, Specific_head, loss_fun, client_num, device)
+        if args.version in [39, 61]:
+            for client_idx, model in enumerate(models):
+                client_weight[client_idx] = weight_calculate(models, train_loaders[client_idx], loss_fun, client_num, device)
+        elif args.version == 40:
+            for client_idx in range(client_num):
+                Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].classifier)
+            for client_idx, model in enumerate(models):
+                client_weight[client_idx] = weight_calculate_approximate(model, Specific_head, train_loaders[client_idx], loss_fun, client_num, device)
+        elif args.version in [41, 62]:
+            for client_idx in range(client_num):
+                Specific_head[client_idx] = copy.deepcopy(models[client_idx].classifier)
+            for client_idx, model in enumerate(models):
+                client_weight[client_idx] = weight_calculate_approximate(model, Specific_head, train_loaders[client_idx], loss_fun, client_num, device)
+        elif args.version in [58, 64]:
+            for client_idx, model in enumerate(models):
+                client_weight[client_idx] = weight_calculate_sharpen(models, train_loaders[client_idx], loss_fun, client_num, device)
+        elif args.version == 59:
+            for client_idx in range(client_num):
+                Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].classifier)
+            for client_idx, model in enumerate(models):
+                client_weight[client_idx] = weight_calculate_approximate_sharpen(model, Specific_head, train_loaders[client_idx], loss_fun, client_num, device)
+        elif args.version in [60, 65]:
+            for client_idx in range(client_num):
+                Specific_head[client_idx] = copy.deepcopy(models[client_idx].classifier)
+            for client_idx, model in enumerate(models):
+                client_weight[client_idx] = weight_calculate_approximate_sharpen(model, Specific_head, train_loaders[client_idx], loss_fun, client_num, device, alpha=0.02)
 
     return train_loss, train_acc, proto_dict, client_weight
+
+
+def train_gen_full_kl_p_initialization(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    model.train()
+    p_model.train()
+
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter != 0:
+        back_g_model = copy.deepcopy(model)
+        back_g_model.eval()
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_p = p_model(data)
+            last_g = back_g_model(data)
+
+            p_optimizer.zero_grad()
+            loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
+            loss_p.backward()
+            p_optimizer.step()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        part3 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
+                output_gen = Spe_classifier(feature_g)
+                output_per = Spe_classifier(feature_p)
+                part2 += loss_g(output_gen, target)
+                part3 += loss_g(output_per, target)
+        loss = part1 + part2
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target) + part3
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def train_gen_full_kl_g_initialization(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    model.train()
+    p_model.train()
+
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter != 0:
+        back_p_model = copy.deepcopy(p_model)
+        back_p_model.eval()
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_g = model(data)
+            last_p = back_p_model(data)
+
+            optimizer.zero_grad()
+            loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
+            loss.backward()
+            optimizer.step()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        part3 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
+                output_gen = Spe_classifier(feature_g)
+                output_per = Spe_classifier(feature_p)
+                part2 += loss_g(output_gen, target)
+                part3 += loss_g(output_per, target)
+        loss = part1 + part2
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target) + part3
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p.detach()).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def train_kl_p_initialization(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    model.train()
+    p_model.train()
+
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter != 0:
+        back_g_model = copy.deepcopy(model)
+        back_g_model.eval()
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_p = p_model(data)
+            last_g = back_g_model(data)
+
+            p_optimizer.zero_grad()
+            loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
+            loss_p.backward()
+            p_optimizer.step()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        loss = loss_g(output_g, target)
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p.detach()).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def train_kl_g_initialization(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    model.train()
+    p_model.train()
+
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter != 0:
+        back_p_model = copy.deepcopy(p_model)
+        back_p_model.eval()
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_g = model(data)
+            last_p = back_p_model(data)
+
+            optimizer.zero_grad()
+            loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
+            loss.backward()
+            optimizer.step()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        loss = loss_g(output_g, target)
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p.detach()).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def train_kl_initialization_full(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    model.train()
+    p_model.train()
+
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter != 0:
+        back_g_model = copy.deepcopy(model)
+        back_g_model.eval()
+        back_p_model = copy.deepcopy(p_model)
+        back_p_model.eval()
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_g = model(data)
+            output_p = p_model(data)
+
+            last_g = back_g_model(data)
+            last_p = back_p_model(data)
+
+            optimizer.zero_grad()
+            loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
+            loss.backward()
+            optimizer.step()
+
+            p_optimizer.zero_grad()
+            loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
+            loss_p.backward()
+            p_optimizer.step()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        loss = loss_g(output_g, target)
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p.detach()).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def weight_calculate_approximate(model, Specific_heads, data_loader, loss_fun, client_num, device):
+    with torch.no_grad():
+        weight_list = []
+        model.eval()
+        for ccix in range(client_num):
+            ttt_model = copy.deepcopy(Specific_heads[ccix])
+            ttt_model.eval()
+            loss_all = 0
+            total = 0
+            correct = 0
+            for data, target in data_loader:
+                data = data.to(device)
+                target = target.to(device)
+                feature_g = model.produce_feature(data) 
+                output_client = ttt_model(feature_g)
+                # loss = loss_g(output_client, target)
+
+                # loss_all += loss.item()
+                total += target.size(0)
+                pred = output_client.data.max(1)[1]
+                correct += pred.eq(target.view(-1)).sum().item()
+            weight_list.append(correct/total)
+
+        acc_sum = sum(weight_list)
+        w_list = [x/acc_sum for x in weight_list]
+    return w_list
+
+
+def weight_calculate_approximate_sharpen(model, Specific_heads, data_loader, loss_fun, client_num, device, alpha=0.2):
+    with torch.no_grad():
+        weight_list = []
+        model.eval()
+        for ccix in range(client_num):
+            ttt_model = copy.deepcopy(Specific_heads[ccix])
+            ttt_model.eval()
+            loss_all = 0
+            total = 0
+            correct = 0
+            for data, target in data_loader:
+                data = data.to(device)
+                target = target.to(device)
+                feature_g = model.produce_feature(data) 
+                output_client = ttt_model(feature_g)
+
+                total += target.size(0)
+                pred = output_client.data.max(1)[1]
+                correct += pred.eq(target.view(-1)).sum().item()
+            weight_list.append(math.exp((correct/total)/alpha))
+
+        acc_sum = sum(weight_list)
+        w_list = [x/acc_sum for x in weight_list]
+    return w_list
+
+
+def weight_calculate(models, data_loader, loss_fun, client_num, device):
+    with torch.no_grad():
+        weight_list = []
+
+        for ccix in range(client_num):
+            ttt_model = copy.deepcopy(models[ccix])
+            ttt_model.eval()
+            loss_all = 0
+            total = 0
+            correct = 0
+            for data, target in data_loader:
+                data = data.to(device)
+                target = target.to(device)
+                output_g = ttt_model(data)
+                # loss = loss_g(output_g, target)
+
+                # loss_all += loss.item()
+                total += target.size(0)
+                pred = output_g.data.max(1)[1]
+                correct += pred.eq(target.view(-1)).sum().item()
+            weight_list.append(correct/total)
+
+        acc_sum = sum(weight_list)
+        w_list = [x/acc_sum for x in weight_list]
+    return w_list
+
+
+def weight_calculate_sharpen(models, data_loader, loss_fun, client_num, device):
+    with torch.no_grad():
+        weight_list = []
+
+        for ccix in range(client_num):
+            ttt_model = copy.deepcopy(models[ccix])
+            ttt_model.eval()
+            loss_all = 0
+            total = 0
+            correct = 0
+            for data, target in data_loader:
+                data = data.to(device)
+                target = target.to(device)
+                output_g = ttt_model(data)
+
+                total += target.size(0)
+                pred = output_g.data.max(1)[1]
+                correct += pred.eq(target.view(-1)).sum().item()
+            weight_list.append(math.exp((correct/total)/0.2))
+
+        acc_sum = sum(weight_list)
+        w_list = [x/acc_sum for x in weight_list]
+    return w_list
+
+
+def train_gen_full_kl_initialization_full(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    model.train()
+    p_model.train()
+
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter != 0:
+        back_g_model = copy.deepcopy(model)
+        back_g_model.eval()
+        back_p_model = copy.deepcopy(p_model)
+        back_p_model.eval()
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_g = model(data)
+            output_p = p_model(data)
+
+            last_g = back_g_model(data)
+            last_p = back_p_model(data)
+
+            optimizer.zero_grad()
+            loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
+            loss.backward()
+            optimizer.step()
+
+            p_optimizer.zero_grad()
+            loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
+            loss_p.backward()
+            p_optimizer.step()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        part3 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
+                output_gen = Spe_classifier(feature_g)
+                output_per = Spe_classifier(feature_p)
+                part2 += loss_g(output_gen, target)
+                part3 += loss_g(output_per, target)
+        loss = part1 + part2
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target) + part3
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def train_gen_kl_initialization_full(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    model.train()
+    p_model.train()
+
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter != 0:
+        back_g_model = copy.deepcopy(model)
+        back_g_model.eval()
+        back_p_model = copy.deepcopy(p_model)
+        back_p_model.eval()
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_g = model(data)
+            output_p = p_model(data)
+
+            last_g = back_g_model(data)
+            last_p = back_p_model(data)
+
+            optimizer.zero_grad()
+            loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
+            loss.backward()
+            optimizer.step()
+
+            p_optimizer.zero_grad()
+            loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
+            loss_p.backward()
+            p_optimizer.step()
+
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
+                output_gen = Spe_classifier(feature_g)
+                part2 += loss_g(output_gen, target)
+        loss = part1 + part2
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def train_gen_full_kl_initialization(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    model.eval()
+    p_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter != 0:
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_g = model(data)
+            output_p = p_model(data)
+
+            p_optimizer.zero_grad()
+            loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(output_g.detach(), dim=1))
+            loss_p.backward()
+            p_optimizer.step()
+
+    model.train()
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        part3 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
+                output_gen = Spe_classifier(feature_g)
+                output_per = Spe_classifier(feature_p)
+                part2 += loss_g(output_gen, target)
+                part3 += loss_g(output_per, target)
+        loss = part1 + part2
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target) + part3
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
+
+
+def train_gen_kl_initialization(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    model.eval()
+    p_model.train()
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter != 0:
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output_g = model(data)
+            output_p = p_model(data)
+
+            p_optimizer.zero_grad()
+            loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(output_g.detach(), dim=1))
+            loss_p.backward()
+            p_optimizer.step()
+
+    model.train()
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        feature_g = model.produce_feature(data)
+        output_g = model.classifier(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
+        part1 = loss_g(output_g, target)
+
+        part2 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
+                output_gen = Spe_classifier(feature_g)
+                part2 += loss_g(output_gen, target)
+        loss = part1 + part2
+        loss.backward()
+        optimizer.step()
+
+        p_optimizer.zero_grad()
+        loss_p = loss_fun(output_p, target)
+        loss_p.backward()
+        p_optimizer.step()
+
+        loss_all += loss_p.item()
+        total += target.size(0)
+        pred = (output_g.detach()+output_p).data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
 
 
 def train_v0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, device):
@@ -260,39 +985,50 @@ def train_v0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss
 
         loss_all += loss_p.item()
         total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
+        pred = (output_g.detach()+output_p.detach()).data.max(1)[1]
         correct += pred.eq(target.view(-1)).sum().item()
 
     return loss_all / len(data_loader), correct/total
 
 
-def train_spe(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, device):
+def train_gen_p(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
     model.train()
     p_model.train()
     loss_all = 0
     total = 0
     correct = 0
     for data, target in data_loader:
-        optimizer.zero_grad()
         data = data.to(device)
         target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
+        output_g = model(data)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.classifier(feature_p)
+
+        optimizer.zero_grad()
         loss = loss_g(output_g, target)
         loss.backward()
         optimizer.step()
 
-        output_p = p_model(feature_g.detach())
-        loss_p = loss_fun(output_p, target)
         p_optimizer.zero_grad()
+        part1 = loss_fun(output_p, target)
+        part2 = 0
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = Specific_heads[idxx]
+                Spe_classifier.eval()
+                output_gen = Spe_classifier(feature_p)
+                part2 += loss_g(output_gen, target)
+        loss_p = part1 + part2
         loss_p.backward()
         p_optimizer.step()
 
         loss_all += loss_p.item()
         total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
+        pred = (output_g.detach()+output_p.detach()).data.max(1)[1]
         correct += pred.eq(target.view(-1)).sum().item()
-
     return loss_all / len(data_loader), correct/total
 
 
@@ -339,7 +1075,7 @@ def train_gen0(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, lo
     return loss_all / len(data_loader), correct/total
 
 
-def train_gen_spe(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
+def train_gen0_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
     client_num = len(Specific_heads.keys())
     assert client_num != 0
     l_lambda = 1/(client_num-1)
@@ -352,8 +1088,9 @@ def train_gen_spe(model, p_model, data_loader, optimizer, p_optimizer, loss_fun,
         data = data.to(device)
         target = target.to(device)
         feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model(feature_g.detach())
+        output_g = model.head(feature_g)
+        feature_p = p_model.produce_feature(data)
+        output_p = p_model.head(feature_p)
 
         optimizer.zero_grad()
         part1 = loss_g(output_g, target)
@@ -415,202 +1152,6 @@ def train_valid_lambda(model, p_model, lab_para, valid_loader, a_optimizer, loss
         # print(" ")
         # print(model.state_dict()['features.conv2.weight'])
     return loss_all / len(valid_loader), correct/total
-
-
-def train_valid_linear(model, p_model, linear_para, valid_loader, a_optimizer, loss_fun, client_idx, device):
-    model.eval()
-    p_model.eval()
-    linear_para.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-
-    for data, target in valid_loader:
-        data = data.to(device)
-        target = target.to(device)
-        output_g = model(data)
-        output_p = p_model(data)
-
-        com = torch.cat([output_g.detach(), output_p.detach()], dim=1)
-        output = linear_para(com)
-
-        a_optimizer.zero_grad()
-        loss_lam = loss_fun(output, target)
-        loss_lam.backward()
-        a_optimizer.step()
-
-        loss_all += loss_lam.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-    return loss_all / len(valid_loader), correct/total
-
-
-def train_gen0_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
-    client_num = len(Specific_heads.keys())
-    assert client_num != 0
-    l_lambda = 1/(client_num-1)
-    model.train()
-    p_model.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.head(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.head(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
-
-        part2 = 0
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                Spe_classifier = Specific_heads[idxx]
-                Spe_classifier.eval()
-                output_gen = Spe_classifier(feature_g)
-                part2 += loss_g(output_gen, target)
-        loss = part1 + part2
-        loss.backward()
-        optimizer.step()
-
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-    return loss_all / len(data_loader), correct/total
-
-
-def train_bn_adap_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_adaptors, client_idx, device):
-    client_num = len(Specific_adaptors.keys())
-    assert client_num != 0
-    l_lambda = 1/(client_num-1)
-    back_model = copy.deepcopy(model)
-    back_model.eval()
-    model.train()
-    p_model.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.head(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.head(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
-
-        part2 = 0
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                BN_list = Specific_adaptors[idxx]
-                for kky in back_model.state_dict().keys():
-                    if 'bn' in kky:
-                        if 'num_batches_tracked' not in kky:
-                            back_model.state_dict()[kky].data.copy_(BN_list[kky])
-                # print("conv weight: ", back_model.state_dict()["features.conv2.weight"][0])
-                # if idxx == 1:
-                #     print("bn2 weight: ", back_model.state_dict()["features.bn2.weight"][0])
-                #     print("bn2 running_mean: ", back_model.state_dict()["features.bn2.running_mean"][0])
-
-                feature_gen = back_model.produce_feature(data)
-                output_gen = model.head(feature_gen.detach())
-                part2 += loss_g(output_gen, target)
-
-        loss = part1 + part2
-        loss.backward()
-        optimizer.step()
-
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        for key in back_model.state_dict().keys():
-            if 'num_batches_tracked' in key:
-                continue
-            else:
-                back_model.state_dict()[key].data.copy_(model.state_dict()[key])
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-    return loss_all / len(data_loader), correct/total
-
-
-def train_bn_adap_gen_head(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, Specific_adaptors, client_idx, device):
-    client_num = len(Specific_adaptors.keys())
-    assert client_num != 0
-    l_lambda = 1/(client_num-1)
-    back_model = copy.deepcopy(model)
-    back_model.eval()
-    model.train()
-    p_model.train()
-    loss_all = 0
-    total = 0
-    correct = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.head(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.head(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
-
-        part2, part3 = 0, 0
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                BN_list = Specific_adaptors[idxx]
-                Spe_classifier = Specific_heads[idxx]
-                Spe_classifier.eval()
-                for kky in back_model.state_dict().keys():
-                    if 'bn' in kky:
-                        if 'num_batches_tracked' not in kky:
-                            back_model.state_dict()[kky].data.copy_(BN_list[kky])
-
-                feature_gen = back_model.produce_feature(data)
-                output_gen = model.head(feature_gen.detach())
-                output_ggg = Spe_classifier(feature_g)
-                part2 += loss_g(output_ggg, target)
-                part3 += loss_g(output_gen, target)
-
-        loss = part1 + part2 + part3
-        loss.backward()
-        optimizer.step()
-
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
-        loss_p.backward()
-        p_optimizer.step()
-
-        for key in back_model.state_dict().keys():
-            if 'num_batches_tracked' in key:
-                continue
-            else:
-                back_model.state_dict()[key].data.copy_(model.state_dict()[key])
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-    return loss_all / len(data_loader), correct/total
 
 
 def train_gen_full(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, device):
@@ -895,251 +1436,4 @@ def train_COPA(model, Specific_heads, data_loader, optimizer, loss_fun, client_i
         optimizer.step()
 
     return loss_all / len(data_loader), correct/total
-
-
-def weight_calculate(models, test_loader, loss_fun, client_num, device):
-    weight_list = []
-
-    for ccix in range(client_num):
-        ttt_model = copy.deepcopy(models[ccix])
-        ttt_model.eval()
-        loss_all = 0
-        total = 0
-        correct = 0
-        for data, target in test_loader:
-            data = data.to(device)
-            target = target.to(device)
-            output_g = ttt_model(data)
-            # loss = loss_g(output_g, target)
-
-            # loss_all += loss.item()
-            total += target.size(0)
-            pred = output_g.data.max(1)[1]
-            correct += pred.eq(target.view(-1)).sum().item()
-        weight_list.append(correct/total)
-
-    acc_sum = sum(weight_list)
-    w_list = [x/acc_sum for x in weight_list]
-    return w_list
-
-
-def weight_calculate_BN_fcos(model, data_loader, Specific_adaptors, loss_fun, client_num, device):
-    weight_list = []
-    ttt_model = copy.deepcopy(model)
-    ttt_model.eval()
-    total = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = ttt_model.produce_feature(data)
-        output_g = ttt_model.head(feature_g)
-        total += data.shape[0]
-
-        for ccix in range(client_num):
-            BN_list = Specific_adaptors[ccix]
-            for kky in ttt_model.state_dict().keys():
-                if 'bn' in kky:
-                    if 'num_batches_tracked' not in kky:
-                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
-
-            feature_gen = ttt_model.produce_feature(data)
-            feature_sim = torch.cosine_similarity(feature_g, feature_gen, dim=1)
-
-            feature_sim_sum = torch.sum(feature_sim)
-            if len(weight_list) != client_num:
-                weight_list.append(feature_sim_sum)
-            else:
-                weight_list[ccix] += feature_sim_sum
-
-    we_list = [torch.exp(-x/total).item() for x in weight_list]
-    fw_sum = sum(we_list)
-    w_list = [x/fw_sum for x in we_list]
-    # print("w list: ", w_list)
-    return w_list
-
-
-def weight_calculate_BN_lcos(model, data_loader, Specific_adaptors, loss_fun, client_num, device):
-    standard_list = []
-    ttt_model = copy.deepcopy(model)
-    ttt_model.eval()
-    total = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = ttt_model.produce_feature(data)
-        output_g = ttt_model.head(feature_g)
-        total += data.shape[0]
-
-        for ccix in range(client_num):
-            BN_list = Specific_adaptors[ccix]
-            for kky in ttt_model.state_dict().keys():
-                if 'bn' in kky:
-                    if 'num_batches_tracked' not in kky:
-                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
-
-            output_gen = ttt_model(data)
-            logit_sim = torch.cosine_similarity(output_g, output_gen, dim=1)
-
-            logit_sim_sum = torch.sum(logit_sim)
-            if len(standard_list) != client_num:
-                standard_list.append(logit_sim_sum)
-            else:
-                standard_list[ccix] += logit_sim_sum 
-
-    st_list = [torch.exp(-x/total).item() for x in standard_list]
-    lg_sum = sum(st_list)
-    l_list = [x/lg_sum for x in st_list]
-    # print("l_list: ", l_list)
-    return l_list
-
-
-def weight_calculate_BN_fkl(model, data_loader, Specific_adaptors, loss_fun, client_num, device):
-    kl_loss = nn.KLDivLoss(reduction='none')
-    weight_list = []
-    ttt_model = copy.deepcopy(model)
-    ttt_model.eval()
-
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = ttt_model.produce_feature(data)
-        # print("outer")
-        # print("outside: ", ttt_model.state_dict()["features.bn2.weight"])
-        for ccix in range(client_num):
-            BN_list = Specific_adaptors[ccix]
-            for kky in ttt_model.state_dict().keys():
-                if 'bn' in kky:
-                    if 'num_batches_tracked' not in kky:
-                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
-
-            # if ccix == 1:
-            #     print(ccix)
-            #     print(BN_list["features.bn2.weight"])
-
-            feature_gen = ttt_model.produce_feature(data)
-            feature_sim = torch.sum(kl_loss(F.log_softmax(feature_gen, dim=1), F.softmax(feature_g, dim=1)))
-
-            if len(weight_list) != client_num:
-                weight_list.append(feature_sim)
-            else:
-                weight_list[ccix] += feature_sim
-
-        # break
-
-    we_list = [torch.exp(-x).item()+1e-9 for x in weight_list]
-    # print(we_list)
-    # assert False
-    fw_sum = sum(we_list)
-    w_list = [x/fw_sum for x in we_list]
-    # print("w list: ", w_list)
-    return w_list
-
-
-def weight_calculate_BN_lkl(model, data_loader, Specific_adaptors, loss_fun, client_num, device):
-    kl_loss = nn.KLDivLoss(reduction='none')
-    standard_list = []
-    ttt_model = copy.deepcopy(model)
-    ttt_model.eval()
-
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        output_g = ttt_model(data)
-
-        for ccix in range(client_num):
-            BN_list = Specific_adaptors[ccix]
-            for kky in ttt_model.state_dict().keys():
-                if 'bn' in kky:
-                    if 'num_batches_tracked' not in kky:
-                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
-
-            output_gen = ttt_model(data)
-            logit_sim = torch.sum(kl_loss(F.log_softmax(output_gen, dim=1), F.softmax(output_g, dim=1)))
-
-            logit_sim_sum = torch.sum(logit_sim)
-            if len(standard_list) != client_num:
-                standard_list.append(logit_sim)
-            else:
-                standard_list[ccix] += logit_sim 
-
-    st_list = [torch.exp(-x).item()+1e-9 for x in standard_list]
-    lg_sum = sum(st_list)
-    l_list = [x/lg_sum for x in st_list]
-    # print("l_list: ", l_list)
-    return l_list
-
-
-def weight_calculate_BN_head_lcos(model, data_loader, Specific_adaptors, Specific_heads, loss_fun, client_num, device):
-    standard_list = []
-    ttt_model = copy.deepcopy(model)
-    ttt_model.eval()
-    total = 0
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = ttt_model.produce_feature(data)
-        output_g = ttt_model.head(feature_g)
-        total += data.shape[0]
-
-        for ccix in range(client_num):
-            BN_list = Specific_adaptors[ccix]
-            Specific_head = Specific_heads[ccix]
-            Specific_head.eval()
-            for kky in ttt_model.state_dict().keys():
-                if 'bn' in kky:
-                    if 'num_batches_tracked' not in kky:
-                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
-
-            feature_gen = ttt_model.produce_feature(data)
-            output_gen = Specific_head(feature_gen)
-            logit_sim = torch.cosine_similarity(output_g, output_gen, dim=1)
-
-            logit_sim_sum = torch.sum(logit_sim)
-            if len(standard_list) != client_num:
-                standard_list.append(logit_sim_sum)
-            else:
-                standard_list[ccix] += logit_sim_sum 
-
-    st_list = [torch.exp(-x/total).item() for x in standard_list]
-    lg_sum = sum(st_list)
-    l_list = [x/lg_sum for x in st_list]
-    # print("l_list: ", l_list)
-    return l_list
-
-
-def weight_calculate_BN_head_lkl(model, data_loader, Specific_adaptors, Specific_heads, loss_fun, client_num, device):
-    kl_loss = nn.KLDivLoss(reduction='none')
-    standard_list = []
-    ttt_model = copy.deepcopy(model)
-    ttt_model.eval()
-
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        output_g = ttt_model(data)
-
-        for ccix in range(client_num):
-            BN_list = Specific_adaptors[ccix]
-            Specific_head = Specific_heads[ccix]
-            Specific_head.eval()
-            for kky in ttt_model.state_dict().keys():
-                if 'bn' in kky:
-                    if 'num_batches_tracked' not in kky:
-                        ttt_model.state_dict()[kky].data.copy_(BN_list[kky])
-
-            feature_gen = ttt_model.produce_feature(data)
-            output_gen = Specific_head(feature_gen)
-            logit_sim = torch.sum(kl_loss(F.log_softmax(output_gen, dim=1), F.softmax(output_g, dim=1)))
-
-            logit_sim_sum = torch.sum(logit_sim)
-            if len(standard_list) != client_num:
-                standard_list.append(logit_sim)
-            else:
-                standard_list[ccix] += logit_sim 
-
-    st_list = [torch.exp(-x).item()+1e-9 for x in standard_list]
-    lg_sum = sum(st_list)
-    l_list = [x/lg_sum for x in st_list]
-    # print("l_list: ", l_list)
-    return l_list
 

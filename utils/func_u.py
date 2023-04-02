@@ -5,6 +5,223 @@ def others_test(version, model, p_model, extra_modules, data_loader, loss_fun, g
     return
 
 
+def peer_test_softmax_learnable(model, p_model, extra_models, data_loader, loss_fun, device):
+    model.eval()
+    p_model.eval()
+    g_tau_emb, p_tau_emb = extra_models
+    g_tau_emb.eval()
+    p_tau_emb.eval()
+
+    g_tau = torch.relu(g_tau_emb(torch.tensor([0], dtype=torch.long).to(device)))+0.2
+    p_tau = torch.relu(p_tau_emb(torch.tensor([0], dtype=torch.long).to(device)))+1
+
+    loss_all, loss_ga, loss_pa = 0, 0, 0
+    total = 0
+    correct, correct_g, correct_p = 0, 0, 0
+
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output_g = softmax_sharp(model(data), tau=g_tau)
+        output_p = softmax_sharp(p_model(data), tau=p_tau)
+
+        output =  output_g + output_p
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss_g = loss_fun(output_g, target)
+        loss_p = loss_fun(output_p, target)
+        loss_ga += loss_g
+        loss_pa += loss_p
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+
+    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
+    test_acc = [correct/total, correct_g/total, correct_p/total]
+    return test_loss, test_acc
+
+
+def peer_test_softmax_normal(model, p_model, data_loader, loss_fun, device):
+    model.eval()
+    p_model.eval()
+    loss_all, loss_ga, loss_pa = 0, 0, 0
+    total = 0
+    correct, correct_g, correct_p = 0, 0, 0
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output_g = F.softmax(model(data), dim=1)
+        output_p = F.softmax(p_model(data), dim=1)
+
+        output = output_g + output_p
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss_g = loss_fun(output_g, target)
+        loss_p = loss_fun(output_p, target)
+        loss_ga += loss_g
+        loss_pa += loss_p
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+
+    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
+    test_acc = [correct/total, correct_g/total, correct_p/total]
+    return test_loss, test_acc
+
+
+def peer_test_KL(model, p_model, a_model, data_loader, loss_fun, device):
+    model.eval()
+    p_model.eval()
+    a_model.eval()
+    loss_all, loss_ga, loss_pa, loss_gpa = 0, 0, 0, 0
+    total = 0
+    correct, correct_g, correct_p, correct_gp = 0, 0, 0, 0
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output_g = model(data)
+        output_p = p_model(data)
+        output = a_model(data)
+        output_gp = output_g + output_p
+
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss_g = loss_fun(output_g, target)
+        loss_p = loss_fun(output_p, target)
+        loss_gp = loss_fun(output_gp, target)
+        loss_ga += loss_g
+        loss_pa += loss_p
+        loss_gpa += loss_gp
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+        pred_gp = output_gp.data.max(1)[1]
+        correct_gp += pred_gp.eq(target.view(-1)).sum().item()
+
+    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gpa/len(data_loader)]
+    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gp/total]
+    return test_loss, test_acc
+
+
+def peer_test_hyper_special(model, p_model, hnet, data_loader, loss_fun, client_idx, device):
+    model.eval()
+    p_model.eval()
+    hnet.eval()
+    loss_all, loss_ga, loss_pa = 0, 0, 0
+    total = 0
+    correct, correct_g, correct_p = 0, 0, 0
+
+    node_weights, node_weights_g = hnet(torch.tensor([client_idx], dtype=torch.long).to(device), True)
+    p_model.load_state_dict(node_weights, strict=False)
+    model.load_state_dict(node_weights_g, strict=False)
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output_g = model(data)
+        output_p = p_model(data)
+
+        output = output_g.detach()+output_p
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss_g = loss_fun(output_g, target)
+        loss_p = loss_fun(output_p, target)
+        loss_ga += loss_g
+        loss_pa += loss_p
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+
+    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
+    test_acc = [correct/total, correct_g/total, correct_p/total]
+    return test_loss, test_acc
+
+
+def peer_test_hyper(model, p_model, hnet, data_loader, loss_fun, client_idx, device):
+    model.eval()
+    p_model.eval()
+    hnet.eval()
+    loss_all, loss_ga, loss_pa = 0, 0, 0
+    total = 0
+    correct, correct_g, correct_p = 0, 0, 0
+
+    node_weights = hnet(torch.tensor([client_idx], dtype=torch.long).to(device), True)
+    p_model.load_state_dict(node_weights, strict=False)
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output_g = model(data)
+        output_p = p_model(data)
+
+        output = output_g.detach()+output_p
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+        loss_g = loss_fun(output_g, target)
+        loss_p = loss_fun(output_p, target)
+        loss_ga += loss_g
+        loss_pa += loss_p
+
+        pred_g = output_g.data.max(1)[1]
+        correct_g += pred_g.eq(target.view(-1)).sum().item()
+        pred_p = output_p.data.max(1)[1]
+        correct_p += pred_p.eq(target.view(-1)).sum().item()
+
+    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
+    test_acc = [correct/total, correct_g/total, correct_p/total]
+    return test_loss, test_acc
+
+
+def normal_test_softmax(model, data_loader, loss_fun, device):
+    model.eval()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+
+        data = data.to(device)
+        target = target.to(device)
+        output = F.softmax(model(data), dim=1)
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
+
+    return loss_all / len(data_loader), correct/total
+
+
 def fedtp_test(idx, model, hnet, data_loader, loss_fun, device):
     hnet.eval()
     model.eval()
@@ -23,463 +240,6 @@ def fedtp_test(idx, model, hnet, data_loader, loss_fun, device):
         total += target.size(0)
         pred = output.data.max(1)[1]
         correct += pred.eq(target.view(-1)).sum().item()
-
-
-def peer_test1(model, p_model, data_loader, loss_fun, device):
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_gaad, loss_paad = 0, 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_gad, correct_pad = 0, 0, 0, 0, 0
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        feature_p = p_model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model.classifier(feature_p)
-
-        feature_ga = p_model.f_adaptor(feature_g)
-        output_ga = p_model.classifier(feature_ga)
-        output_pa = p_model.c_adaptor(output_p)
-
-        output = output_g.detach()+output_p
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ag = loss_fun(output_ga, target)
-        loss_ap = loss_fun(output_pa, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
-        loss_gaad += loss_ag
-        loss_paad += loss_ap
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_ag = output_ga.data.max(1)[1]
-        correct_gad += pred_ag.eq(target.view(-1)).sum().item()
-        pred_ap = output_pa.data.max(1)[1]
-        correct_pad += pred_ap.eq(target.view(-1)).sum().item()
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gaad/len(data_loader), loss_paad/len(data_loader)]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gad/total, correct_pad/total]
-    return test_loss, test_acc
-
-
-def peer_test2(model, p_model, data_loader, loss_fun, device):
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_gaad, loss_paad = 0, 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_gad, correct_pad = 0, 0, 0, 0, 0
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        output_g = model(data)
-        output_p = p_model(data)
-
-        feature_ga = model.produce_adapt_feature(data)
-        output_ga = p_model.classifier(feature_ga)
-        output_pa = p_model.c_adaptor(output_p)
-
-        output = output_g.detach()+output_p
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ag = loss_fun(output_ga, target)
-        loss_ap = loss_fun(output_pa, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
-        loss_gaad += loss_ag
-        loss_paad += loss_ap
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_ag = output_ga.data.max(1)[1]
-        correct_gad += pred_ag.eq(target.view(-1)).sum().item()
-        pred_ap = output_pa.data.max(1)[1]
-        correct_pad += pred_ap.eq(target.view(-1)).sum().item()
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gaad/len(data_loader), loss_paad/len(data_loader)]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gad/total, correct_pad/total]
-    return test_loss, test_acc
-
-
-def peer_shabby_adaptor_validate(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device):
-    client_num = len(extra_modules)
-    assert client_num != 0
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_gaad= 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_gad= 0, 0, 0, 0
-    adapt_loss_dict = {}
-    adapt_acc_dict = {}
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        feature_p = p_model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model.classifier(feature_p)
-
-        feature_ga = p_model.f_adaptor(feature_g)
-        output_ga = p_model.classifier(feature_ga)
-
-        output = output_g.detach()+output_p.detach()
-
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                adaptor, classifier_adapt = extra_modules[idxx]
-                adaptor.eval()
-                classifier_adapt.eval()
-                feature_adapt = adaptor(feature_g)
-                output_adapt = classifier_adapt(feature_adapt)
-                loss = loss_fun(output_adapt, target)
-                pred = output_adapt.max(1)[1]
-                correct_ada = pred.eq(target.view(-1)).sum().item()
-
-                if idxx in adapt_loss_dict.keys():
-                    adapt_loss_dict[idxx] += loss.item()
-                    adapt_acc_dict[idxx] += correct_ada
-                else:
-                    adapt_loss_dict[idxx] = loss.item()
-                    adapt_acc_dict[idxx] = correct_ada
-                output += output_adapt.detach()
-
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ag = loss_fun(output_ga, target)
-        loss_ga += loss_g.item()
-        loss_pa += loss_p.item()
-        loss_gaad += loss_ag.item()
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_ag = output_ga.data.max(1)[1]
-        correct_gad += pred_ag.eq(target.view(-1)).sum().item()
-
-    for idxx in range(client_num):
-        if idxx != client_idx:
-            adapt_loss_dict[idxx] = adapt_loss_dict[idxx]/len(data_loader)
-            adapt_acc_dict[idxx] = adapt_acc_dict[idxx]/total
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gaad/len(data_loader), adapt_loss_dict]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gad/total, adapt_acc_dict]
-    return test_loss, test_acc
-
-
-def peer_shabby_validate(model, p_model, data_loader, loss_fun, device):
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_gaad = 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_gad = 0, 0, 0, 0
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        feature_p = p_model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model.classifier(feature_p)
-
-        feature_ga = p_model.f_adaptor(feature_g)
-        output_ga = p_model.classifier(feature_ga)
-
-        output = output_g.detach()+output_p
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ag = loss_fun(output_ga, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
-        loss_gaad += loss_ag
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_ag = output_ga.data.max(1)[1]
-        correct_gad += pred_ag.eq(target.view(-1)).sum().item()
-
-        # break
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gaad/len(data_loader)]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gad/total]
-    return test_loss, test_acc
-
-
-def peer_shabby_validate1(model, p_model, adaptor, data_loader, loss_fun, device):
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_gaad = 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_gad = 0, 0, 0, 0
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        feature_p = p_model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model.classifier(feature_p)
-
-        feature_ga = adaptor(feature_g)
-        output_ga = p_model.classifier(feature_ga)
-
-        output = output_g.detach()+output_p
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ag = loss_fun(output_ga, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
-        loss_gaad += loss_ag
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_ag = output_ga.data.max(1)[1]
-        correct_gad += pred_ag.eq(target.view(-1)).sum().item()
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gaad/len(data_loader)]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gad/total]
-    return test_loss, test_acc
-
-
-def peer_residual_validate(model, p_model, data_loader, loss_fun, device):
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_gaad = 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_gad = 0, 0, 0, 0
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        output_g = model(data)
-        output_p = p_model(data)
-
-        feature_ga = model.produce_adapt_feature(data)
-        output_ga = p_model.classifier(feature_ga)
-
-        output = output_g.detach()+output_p
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ag = loss_fun(output_ga, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
-        loss_gaad += loss_ag
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_ag = output_ga.data.max(1)[1]
-        correct_gad += pred_ag.eq(target.view(-1)).sum().item()
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gaad/len(data_loader)]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gad/total]
-    return test_loss, test_acc
-
-
-def peer_shabby_adaptor(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device):
-    client_num = len(extra_modules)
-    assert client_num != 0
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_gaad= 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_gad= 0, 0, 0, 0
-    adapt_loss_dict = {}
-    adapt_acc_dict = {}
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        feature_p = p_model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model.classifier(feature_p)
-
-        feature_ga = p_model.f_adaptor(feature_g)
-        output_ga = p_model.classifier(feature_ga)
-
-        output = output_g.detach()+output_p.detach()
-
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                adaptor, classifier_adapt = extra_modules[idxx]
-                adaptor.eval()
-                classifier_adapt.eval()
-                feature_adapt = adaptor(feature_g)
-                output_adapt = classifier_adapt(feature_adapt)
-                loss = loss_fun(output_adapt, target)
-                pred = output_adapt.max(1)[1]
-                correct_ada = pred.eq(target.view(-1)).sum().item()
-
-                if idxx in adapt_loss_dict.keys():
-                    adapt_loss_dict[idxx] += loss.item()
-                    adapt_acc_dict[idxx] += correct_ada
-                else:
-                    adapt_loss_dict[idxx] = loss.item()
-                    adapt_acc_dict[idxx] = correct_ada
-                output += output_adapt.detach()
-
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ag = loss_fun(output_ga, target)
-        loss_ga += loss_g.item()
-        loss_pa += loss_p.item()
-        loss_gaad += loss_ag.item()
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_ag = output_ga.data.max(1)[1]
-        correct_gad += pred_ag.eq(target.view(-1)).sum().item()
-
-    for idxx in range(client_num):
-        if idxx != client_idx:
-            adapt_loss_dict[idxx] = adapt_loss_dict[idxx]/len(data_loader)
-            adapt_acc_dict[idxx] = adapt_acc_dict[idxx]/total
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gaad/len(data_loader), adapt_loss_dict]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gad/total, adapt_acc_dict]
-    return test_loss, test_acc
-
-
-def peer_residual_adaptor(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device):
-    client_num = len(extra_modules)
-    assert client_num != 0
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_gaad= 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_gad= 0, 0, 0, 0
-    adapt_loss_dict = {}
-    adapt_acc_dict = {}
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-
-        back_up1 = copy.deepcopy(model.adap3.state_dict())
-        back_up2 = copy.deepcopy(model.adap4.state_dict())
-        back_up3 = copy.deepcopy(model.adap5.state_dict())
-
-        feature_g = model.produce_feature(data)
-        feature_p = p_model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model.classifier(feature_p)
-
-        feature_ga = model.produce_adapt_feature(data)
-        output_ga = p_model.classifier(feature_ga)
-
-        output = output_g.detach()+output_p.detach()
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                adap3, adap4, adap5, classifier_adapt = extra_modules[idxx]
-                model.load_state_dict(adap3, strict=False)
-                model.load_state_dict(adap4, strict=False)
-                model.load_state_dict(adap5, strict=False)
-                classifier_adapt.eval()
-
-                feature_adapt = model.produce_adapt_feature(data)
-                output_adapt = classifier_adapt(feature_adapt)
-                loss = loss_fun(output_adapt, target)
-                pred = output_adapt.max(1)[1]
-                correct_ada = pred.eq(target.view(-1)).sum().item()
-                if idxx in adapt_loss_dict.keys():
-                    adapt_loss_dict[idxx] += loss.item()
-                    adapt_acc_dict[idxx] += correct_ada
-                else:
-                    adapt_loss_dict[idxx] = loss.item()
-                    adapt_acc_dict[idxx] = correct_ada
-                output += output_adapt.detach()
-
-        model.load_state_dict(back_up1, strict=False)
-        model.load_state_dict(back_up2, strict=False)
-        model.load_state_dict(back_up3, strict=False)
-
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ag = loss_fun(output_ga, target)
-        loss_ga += loss_g.item()
-        loss_pa += loss_p.item()
-        loss_gaad += loss_ag.item()
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_ag = output_ga.data.max(1)[1]
-        correct_gad += pred_ag.eq(target.view(-1)).sum().item()
-
-    for idxx in range(client_num):
-        if idxx != client_idx:
-            adapt_loss_dict[idxx] = adapt_loss_dict[idxx]/len(data_loader)
-            adapt_acc_dict[idxx] = adapt_acc_dict[idxx]/total
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gaad/len(data_loader), adapt_loss_dict]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gad/total, adapt_acc_dict]
-    return test_loss, test_acc
 
 
 def log_write_dictionary(logfile, dictionary, mode='Loss', data='domainnet', division='Test'):

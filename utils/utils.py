@@ -42,7 +42,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                 models[client_idx].load_state_dict(copy.deepcopy(paggre_models[client_idx].state_dict()))
 
         elif args.mode.lower() == 'peer':
-            if args.version in [63, 64, 67, 68, 69, 76, 81]:
+            if args.version in [63, 76, 81, 45, 12, 54, 55, 56, 57, 71, 78, 79, 80, 82, 83, 88, 89]:
                 for key in server_model.state_dict().keys():
                     if 'bn' not in key:
                         temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
@@ -51,59 +51,93 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                         server_model.state_dict()[key].data.copy_(temp)
                         for client_idx in range(client_num):
                             models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version in [82, 84, 85]:
-                for key in server_model.state_dict().keys():
-                    if 'bn' not in key:
-                        if 'classifier' not in key:
-                            temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
-                            for client_idx in range(client_num):
-                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
-                            server_model.state_dict()[key].data.copy_(temp)
-                            for client_idx in range(client_num):
-                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version in [83, 86, 87]:
-                for key in server_model.state_dict().keys():
-                    if 'classifier' not in key:
-                        if 'num_batches_tracked' in key:
-                            server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
-                        else:
-                            temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
-                            for client_idx in range(client_num):
-                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
-                            server_model.state_dict()[key].data.copy_(temp)
-                            for client_idx in range(client_num):
-                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version in [59, 60, 61, 72, 73, 74, 75, 77, 78, 79, 80]:
+            elif args.version in [39, 40, 41, 58, 59, 60, 61, 62, 64, 65]:
                 for client_idx in range(client_num):
                     weight_list = client_weights[client_idx]
                     for key in server_model.state_dict().keys():
+                        if 'running' not in key:
+                            if 'num_batches_tracked' in key:
+                                server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
+                            else:
+                                temp = torch.zeros_like(server_model.state_dict()[key])
+                                for client_jdx in range(client_num):
+                                    temp += weight_list[client_jdx] * models[client_jdx].state_dict()[key]
+                                server_model.state_dict()[key].data.copy_(temp)
+                                paggre_models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+                for key in server_model.state_dict().keys():
+                    if 'running' not in key:
+                        if 'num_batches_tracked' in key:
+                            continue
+                        else:
+                            for client_idx in range(client_num):
+                                models[client_idx].state_dict()[key].data.copy_(paggre_models[client_idx].state_dict()[key])
+            elif args.version in [2, 3, 4, 5, 6, 7, 8]:
+                for key in server_model.state_dict().keys():
+                    if 'num_batches_tracked' in key:
+                        server_model.state_dict()[key].data.copy_(paggre_models[0].state_dict()[key])
+                    else:
+                        temp = torch.zeros_like(server_model.state_dict()[key])
+                        for client_idx in range(client_num):
+                            temp += client_weights[client_idx] * paggre_models[client_idx].state_dict()[key]
+                        server_model.state_dict()[key].data.copy_(temp)
+                        for client_idx in range(client_num):
+                            models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+            elif args.version in [24, 32, 33, 34, 38, 42, 43, 44, 46, 47, 19, 15, 48, 49, 72, 74, 75, 77, 84, 85, 86, 87]:
+                for key in server_model.state_dict().keys():
+                    if 'running' not in key:
                         if 'num_batches_tracked' in key:
                             server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
                         else:
                             temp = torch.zeros_like(server_model.state_dict()[key])
-                            for client_jdx in range(client_num):
-                                temp += weight_list[client_jdx] * models[client_jdx].state_dict()[key]
+                            for client_idx in range(client_num):
+                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
                             server_model.state_dict()[key].data.copy_(temp)
-                            paggre_models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+                            for client_idx in range(client_num):
+                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+            elif args.version == 26:
                 for key in server_model.state_dict().keys():
                     if 'num_batches_tracked' in key:
                         server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
                     else:
-                        for client_idx in range(client_num):
-                            models[client_idx].state_dict()[key].data.copy_(paggre_models[client_idx].state_dict()[key])                
-            elif args.version in [3, 4, 6, 16, 9, 10, 13, 14, 21, 22]:
+                        if 'bn' in key:
+                            if 'running' in key:
+                                temp = torch.zeros_like(server_model.state_dict()[key])
+                                for client_idx in range(client_num):
+                                    temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
+                                server_model.state_dict()[key].data.copy_(temp)
+                                for client_idx in range(client_num):
+                                    models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+                        else:
+                            temp = torch.zeros_like(server_model.state_dict()[key])
+                            for client_idx in range(client_num):
+                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
+                            server_model.state_dict()[key].data.copy_(temp)
+                            for client_idx in range(client_num):
+                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+            elif args.version == 35:
                 for key in server_model.state_dict().keys():
-                    if 'num_batches_tracked' in key:
-                        server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
-                    elif 'adap' in key:
-                        continue
-                    else:
-                        temp = torch.zeros_like(server_model.state_dict()[key])
-                        for client_idx in range(client_num):
-                            temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
-                        server_model.state_dict()[key].data.copy_(temp)
-                        for client_idx in range(client_num):
-                            models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+                    if 'running_mean' not in key:
+                        if 'num_batches_tracked' in key:
+                            server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
+                        else:
+                            temp = torch.zeros_like(server_model.state_dict()[key])
+                            for client_idx in range(client_num):
+                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
+                            server_model.state_dict()[key].data.copy_(temp)
+                            for client_idx in range(client_num):
+                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+            elif args.version == 36:
+                for key in server_model.state_dict().keys():
+                    if 'running_var' not in key:
+                        if 'num_batches_tracked' in key:
+                            server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
+                        else:
+                            temp = torch.zeros_like(server_model.state_dict()[key])
+                            for client_idx in range(client_num):
+                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
+                            server_model.state_dict()[key].data.copy_(temp)
+                            for client_idx in range(client_num):
+                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
             else:
                 for key in server_model.state_dict().keys():
                     if 'num_batches_tracked' in key:
@@ -192,40 +226,26 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
     return server_model, models, global_prototypes
 
 
-def test(client_idx, model, p_model, extra_modules, data_loader, loss_fun, device, args, hnet, global_prototype, flog=False):
+def test(client_idx, model, p_model, a_model, extra_modules, data_loader, loss_fun, device, args, hnet, global_prototype, flog=False):
     if args.mode in ['fedbn', 'fedavg', 'fedprox', 'local', 'fedtp', 'fedap', 'AlignFed', 'COPA']:
         test_loss, test_acc = normal_test(model, data_loader, loss_fun, device)
     elif args.mode == 'peer':
-        if args.version == 27:
-            test_loss, test_acc = peer_test_uppper_bound(model, p_model, data_loader, loss_fun, client_idx, device)
-        elif args.version in [88, 89]:
-            test_loss, test_acc = peer_spe_test(model, p_model, data_loader, loss_fun, device)
-        elif args.version in [70, 76, 81, 82, 85, 86, 87]:
+        if args.version in [70, 76, 81, 33, 34, 42, 47, 15, 49, 57, 55, 73]:
             test_loss, test_acc = peer_test_lambda(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
-        elif args.version == 71:
-            test_loss, test_acc = peer_test_linear(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
-        elif args.version == 30:
-            test_loss, test_acc = peer_test_adapt_here(model, p_model, data_loader, loss_fun, client_idx, device)
-        elif args.version == 58:
-            test_loss, test_acc = peer_gen_test(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device)
-        elif args.version in [1, 2]:
-            test_loss, test_acc = peer_test1(model, p_model, data_loader, loss_fun, device)
-        elif args.version in [3, 4]:
-            test_loss, test_acc = peer_test2(model, p_model, data_loader, loss_fun, device)
-        elif args.version in [15, 24, 40, 41, 42, 43]:
-            test_loss, test_acc = peer_shabby_validate(model, p_model, data_loader, loss_fun, device)
-        elif args.version in [23, 26]:
-            test_loss, test_acc = peer_shabby_validate1(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
-        elif args.version in [16]:
-            test_loss, test_acc = peer_residual_validate(model, p_model, data_loader, loss_fun, device)
-        elif args.version in [5, 11, 12, 19, 20, 31]:
-            test_loss, test_acc = peer_shabby_adaptor(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device)
-        elif args.version == 29:
-            test_loss, test_acc = peer_shabby_adaptor_validate(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device)
-        elif args.version in [6, 13, 14, 21, 22]:
-            test_loss, test_acc = peer_residual_adaptor(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device)
-        elif args.version in [65, 66, 68, 69]:
-            test_loss, test_acc = peer_BN_test(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device)
+        elif args.version in [2, 3, 4, 5, 6, 7, 8, 22, 23]:
+            test_loss, test_acc = peer_test_KL(model, p_model, a_model, data_loader, loss_fun, device)
+        elif args.version in [21, 27, 29]:
+            test_loss, test_acc = peer_test_hyper(model, p_model, hnet, data_loader, loss_fun, client_idx, device)
+        elif args.version in [30, 31]:
+            test_loss, test_acc = peer_test_hyper_special(model, p_model, hnet, data_loader, loss_fun, client_idx, device)
+        elif args.version in [24, 26, 35, 36, 45, 14, 61, 62, 64, 65]:
+            test_loss, test_acc = normal_test(model, data_loader, loss_fun, device)
+        elif args.version == 20:
+            test_loss, test_acc = peer_test_softmax_normal(model, p_model, data_loader, loss_fun, device)
+        elif args.version in [50, 51, 52, 53]:
+            test_loss, test_acc = peer_test_softmax_learnable(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
+        elif args.version in [12, 13]:
+            test_loss, test_acc = normal_test_softmax(model, data_loader, loss_fun, device)
         else:
             test_loss, test_acc = peer_test(model, p_model, data_loader, loss_fun, device)
     elif args.mode == 'fedper':
@@ -235,6 +255,12 @@ def test(client_idx, model, p_model, extra_modules, data_loader, loss_fun, devic
     elif args.mode == 'fedtp':
         test_loss, test_acc = fedtp_test(client_idx, model, hnet, data_loader, loss_fun, device)
     return test_loss, test_acc
+
+
+def softmax_sharp(x, tau=1):
+    x_exp = torch.exp(x/tau)
+    x_sum = torch.sum(x_exp, dim=1).view(-1,1)
+    return x_exp/x_sum
 
 
 def euclidean_dist(x, y):
@@ -341,42 +367,6 @@ def peer_test(model, p_model, data_loader, loss_fun, device):
     return test_loss, test_acc
 
 
-def peer_spe_test(model, p_model, data_loader, loss_fun, device):
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa = 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p = 0, 0, 0
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model(feature_g.detach())
-
-        output = output_g.detach()+output_p
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
-    test_acc = [correct/total, correct_g/total, correct_p/total]
-    return test_loss, test_acc
-
-
 def peer_test_lambda(model, p_model, extra_model, data_loader, loss_fun, device):
     model.eval()
     p_model.eval()
@@ -412,179 +402,6 @@ def peer_test_lambda(model, p_model, extra_model, data_loader, loss_fun, device)
 
     test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
     test_acc = [correct/total, correct_g/total, correct_p/total]
-    return test_loss, test_acc
-
-
-def peer_test_linear(model, p_model, extra_model, data_loader, loss_fun, device):
-    model.eval()
-    p_model.eval()
-    extra_model.eval()
-    loss_all, loss_ga, loss_pa = 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p = 0, 0, 0
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        output_g = model(data)
-        output_p = p_model(data)
-
-        com = torch.cat([output_g.detach(), output_p.detach()], dim=1)
-        output = extra_model(com)
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader)]
-    test_acc = [correct/total, correct_g/total, correct_p/total]
-    return test_loss, test_acc
-
-
-def peer_test_uppper_bound(model, p_models, data_loader, loss_fun, client_idx, device):
-    model.eval()
-    client_num = len(p_models)
-    assert client_num != 0
-    p_model = p_models[client_idx]
-    p_model.eval()
-    loss_all, loss_ga, loss_pa = 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p = 0, 0, 0
-    other_loss_dict = {}
-    other_acc_dict = {}
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        output_g = model(data)
-        output_p = p_model(data)
-
-        output = output_g.detach()+output_p
-
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                p_model_other = copy.deepcopy(p_models[idxx])
-                p_model_other.eval()
-                output_other = p_model_other(data)
-                loss = loss_fun(output_other, target)
-                pred = output_other.max(1)[1]
-                correct_other = pred.eq(target.view(-1)).sum().item()
-
-                if idxx in other_loss_dict.keys():
-                    other_loss_dict[idxx] += loss.item()
-                    other_acc_dict[idxx] += correct_other
-                else:
-                    other_loss_dict[idxx] = loss.item()
-                    other_acc_dict[idxx] = correct_other
-                output += output_other.detach()
-
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-
-    for idxx in range(client_num):
-        if idxx != client_idx:
-            other_loss_dict[idxx] = other_loss_dict[idxx]/len(data_loader)
-            other_acc_dict[idxx] = other_acc_dict[idxx]/total
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), other_loss_dict]
-    test_acc = [correct/total, correct_g/total, correct_p/total, other_acc_dict]
-    return test_loss, test_acc
-
-
-def peer_test_adapt_here(model, p_models, data_loader, loss_fun, client_idx, device):
-    model.eval()
-    client_num = len(p_models)
-    assert client_num != 0
-    p_model = p_models[client_idx]
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_gaad= 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_gad= 0, 0, 0, 0
-    other_loss_dict = {}
-    other_acc_dict = {}
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        feature_p = p_model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model.classifier(feature_p)
-
-        feature_ga = p_model.f_adaptor(feature_g)
-        output_ga = p_model.classifier(feature_ga)
-
-        output = output_g.detach()+output_p
-
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                p_model_other = copy.deepcopy(p_models[idxx])
-                p_model_other.eval()
-                feature_other = p_model_other.produce_feature(data)
-                output_other = p_model.classifier(p_model.f_adaptor(feature_other))
-                loss = loss_fun(output_other, target)
-                pred = output_other.max(1)[1]
-                correct_other = pred.eq(target.view(-1)).sum().item()
-
-                if idxx in other_loss_dict.keys():
-                    other_loss_dict[idxx] += loss.item()
-                    other_acc_dict[idxx] += correct_other
-                else:
-                    other_loss_dict[idxx] = loss.item()
-                    other_acc_dict[idxx] = correct_other
-                output += output_other.detach()
-
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_ag = loss_fun(output_ga, target)
-        loss_ga += loss_g.item()
-        loss_pa += loss_p.item()
-        loss_gaad += loss_ag.item()
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_ag = output_ga.data.max(1)[1]
-        correct_gad += pred_ag.eq(target.view(-1)).sum().item()
-
-    for idxx in range(client_num):
-        if idxx != client_idx:
-            other_loss_dict[idxx] = other_loss_dict[idxx]/len(data_loader)
-            other_acc_dict[idxx] = other_acc_dict[idxx]/total
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_gaad/len(data_loader), other_loss_dict]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_gad/total, other_acc_dict]
     return test_loss, test_acc
 
 
@@ -652,157 +469,6 @@ def normal_test(model, data_loader, loss_fun, device):
         correct += pred.eq(target.view(-1)).sum().item()
 
     return loss_all / len(data_loader), correct/total
-
-
-def peer_gen_test(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device):
-    client_num = len(extra_modules)
-    assert client_num != 0
-    model.eval()
-    p_model.eval()
-    loss_all, loss_ga, loss_pa, loss_geng = 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_geng = 0, 0, 0, 0
-    adapt_loss_dict = {}
-    adapt_acc_dict = {}
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        output_p = p_model(data)
-
-        output = output_g.detach() + output_p.detach()
-        output_geng = copy.deepcopy(output_g.detach())
-
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                spe_classifier = extra_modules[idxx]
-                spe_classifier.eval()
-
-                output_ggg = spe_classifier(feature_g)
-                loss = loss_fun(output_ggg, target)
-                pred = output_ggg.max(1)[1]
-                correct_ada = pred.eq(target.view(-1)).sum().item()
-
-                if idxx in adapt_loss_dict.keys():
-                    adapt_loss_dict[idxx] += loss.item()
-                    adapt_acc_dict[idxx] += correct_ada
-                else:
-                    adapt_loss_dict[idxx] = loss.item()
-                    adapt_acc_dict[idxx] = correct_ada
-                output_geng += output_ggg.detach()
-
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_gg = loss_fun(output_geng, target)
-        loss_ga += loss_g.item()
-        loss_pa += loss_p.item()
-        loss_geng += loss_gg.item()
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_geng = output_geng.data.max(1)[1]
-        correct_geng += pred_geng.eq(target.view(-1)).sum().item()
-
-    for idxx in range(client_num):
-        if idxx != client_idx:
-            adapt_loss_dict[idxx] = adapt_loss_dict[idxx]/len(data_loader)
-            adapt_acc_dict[idxx] = adapt_acc_dict[idxx]/total
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_geng/len(data_loader), adapt_loss_dict]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_geng/total, adapt_acc_dict]
-    return test_loss, test_acc
-
-
-def peer_BN_test(model, p_model, extra_modules, data_loader, loss_fun, client_idx, device):
-    client_num = len(extra_modules)
-    assert client_num != 0
-    model.eval()
-    p_model.eval()
-    back_model = copy.deepcopy(model)
-    back_model.eval()
-    loss_all, loss_ga, loss_pa, loss_geng = 0, 0, 0, 0
-    total = 0
-    correct, correct_g, correct_p, correct_geng = 0, 0, 0, 0
-    adapt_loss_dict = {}
-    adapt_acc_dict = {}
-    for data, target in data_loader:
-
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.head(feature_g)
-        output_p = p_model(data)
-
-        output = output_g.detach() + output_p.detach()
-        output_geng = copy.deepcopy(output_g.detach())
-
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                BN_list = extra_modules[idxx]
-                for kky in back_model.state_dict().keys():
-                    if 'bn' in kky:
-                        if 'num_batches_tracked' not in kky:
-                            back_model.state_dict()[kky].data.copy_(BN_list[kky])
-                gg_head = copy.deepcopy(model.head)
-                gg_head.eval()
-                feature_gen = back_model.produce_feature(data)
-                output_ggg = gg_head(feature_gen.detach())
-                loss = loss_fun(output_ggg, target)
-                pred = output_ggg.max(1)[1]
-                correct_ada = pred.eq(target.view(-1)).sum().item()
-
-                if idxx in adapt_loss_dict.keys():
-                    adapt_loss_dict[idxx] += loss.item()
-                    adapt_acc_dict[idxx] += correct_ada
-                else:
-                    adapt_loss_dict[idxx] = loss.item()
-                    adapt_acc_dict[idxx] = correct_ada
-                output_geng += output_ggg.detach()
-
-        loss = loss_fun(output, target)
-        loss_all += loss.item()
-        total += target.size(0)
-        pred = output.data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-
-        loss_g = loss_fun(output_g, target)
-        loss_p = loss_fun(output_p, target)
-        loss_gg = loss_fun(output_geng, target)
-        loss_ga += loss_g.item()
-        loss_pa += loss_p.item()
-        loss_geng += loss_gg.item()
-
-        pred_g = output_g.data.max(1)[1]
-        correct_g += pred_g.eq(target.view(-1)).sum().item()
-        pred_p = output_p.data.max(1)[1]
-        correct_p += pred_p.eq(target.view(-1)).sum().item()
-        pred_geng = output_geng.data.max(1)[1]
-        correct_geng += pred_geng.eq(target.view(-1)).sum().item()
-
-    #     print("output_geng: ", output_geng)
-    #     print("output_g: ", output_g)
-    # print(correct_geng)
-    # print(correct_g)
-    # assert False
-
-    for idxx in range(client_num):
-        if idxx != client_idx:
-            adapt_loss_dict[idxx] = adapt_loss_dict[idxx]/len(data_loader)
-            adapt_acc_dict[idxx] = adapt_acc_dict[idxx]/total
-
-    test_loss = [loss_all/len(data_loader), loss_ga/len(data_loader), loss_pa/len(data_loader), loss_geng/len(data_loader), adapt_loss_dict]
-    test_acc = [correct/total, correct_g/total, correct_p/total, correct_geng/total, adapt_acc_dict]
-    return test_loss, test_acc
 
 
 def visualize(client_idx, model, p_model, extra_modules, data_loader, loss_fun, device, args, hnet, global_prototype, flag=2):

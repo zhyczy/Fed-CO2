@@ -1,193 +1,147 @@
-
 def definite_version(version):
-    
-    if version == 46:
-        print("Version46: make use of unlabeled test data")
-
-    elif version == 47:
-        print("Version47: Version46 + knowledge distillation")
-
-    elif version == 48:
-        print("Version48: Version46 + pure KL")
-
-    elif version == 49:
-        print("Version49: logits level distillation for Version47")
-
-    elif version == 1:
-        print("Version1: Introduce Shabby Adaptors")
+    if version == 1:
+        print("Version1: Base model, two branches")
 
     elif version == 2:
-        print("Version2: Version1 Train Shabby adaptors independently")
+        print("Version2: Third knowledge distillation branch-base version, reweighting is done with simple plus implementation")
 
     elif version == 3:
-        print("Version3: Introduce Residual Adaptors")
+        print("Version3: version 2 + P branch generalized")
 
     elif version == 4:
-        print("Version4: Introduce Residual Adaptors independently")
-
-    elif version == 15:
-        print("Version15: Validate Version5 to check whether solely trained adaptor makes an impact on G and P branch")
-
-    elif version == 16:
-        print("Version16: Validate Version6 to check whether solely trained adaptor makes an impact on G and P branch")
-
-    elif version == 7:
-        print("Version7: V18 plus, generalize on adapted features based on Shabby Adaptors")
-
-    elif version == 8:
-        print("Version8: V7 plus generalize both on features and adapted features based on Shabby Adaptors")
-
-    elif version == 9:
-        print("Version9: V18 plus, generalize on adapted features based on Residual Adaptors")
-
-    elif version == 10:
-        print("Version10: V9 plus generalize both on features and adapted features based on Residual Adaptors")
-
-    elif version == 23:
-        print("Version23: Contrast version with Version 15, independent adaptor")
-
-    elif version == 26:
-        print("Version26: Contrast version with Version 15, independent adaptor and deep copy")
+        print("Version4: version 2 + G branch generalized")
 
     elif version == 5:
-            print("Version5: Updated Version2")
+        print("Version5: version 2 + G&P generalized")
 
     elif version == 6:
-        print("Version6: Updated Version4")
+        print("Version6: version 2 + G branch train")
+
+    elif version == 7:
+        print("Version7: version 4 + G branch train")
+
+    elif version == 8:
+        print("Version8: version 5 + G branch train")
+
+    elif version == 9:
+        print("Version9: version18 two phases, knowledge distillation G to P")
+
+    elif version == 10:
+        print("Version10: version9 two phases, G and P are trained seperately")
 
     elif version == 11:
-        print("Version11: KL version of V5")
+        print("Version11: version10, knowledge distillation from P to G in second phase")
 
     elif version == 12:
-        print("Version12: KL and CR for V5")
+        print("Version12: cmp version, fedbn add softmax")
 
     elif version == 13:
-        print("Version13: KL version of V6")
+        print("Version13: cmp version, fedavg add softmax")
 
     elif version == 14:
-        print("Version14: KL and CR for V6")
+        print("Version14: cmp version, remove BNs in classifier for Fedavg")
+
+    elif version == 16:
+        print("Version16: Remove BNs in C for version18")
 
     elif version == 19:
-        print("Version19: V7 + V5, Shabby Adaptors")
+        print("Version19: Remove BNs in C for version32") 
+
+    elif version == 15:
+        print("Version15: Remove BNs in C for Version34")
+
+    elif version == 48:
+        print("Version48: Remove BNs in C for Version46")
+
+    elif version == 49:
+        print("Version49: Remove BNs in C for Version47")
 
     elif version == 20:
-        print("Version20: V7 plus + V5, Shabby Adaptors")
+        print("Version20: cmp version, version18 add softmax")
 
     elif version == 21:
-        print("Version21: V9 + V6, Residual Adaptors")
+        print("Version21: Introduce hyper to produce parameters for classifier in P branch")
 
     elif version == 22:
-        print("Version22: V9 plus + V6, Residual Adaptors")
+        print("Version22: Third branch, Student model replaces adding aggregation, Aggregation model uses G branch still")
+
+    elif version == 23:
+        print("Version23: V22 Two phases, 1.train G&P 2.Distillation")
 
     elif version == 24:
-        print("Version24: Contrast version with Version 15, deep personal classifier copy")
+        print("Version24: Check the influence of running mean and running var")
+
+    elif version == 26:
+        print("Version26: Check the influence of bn weight and bn bias")
 
     elif version == 27:
-        print("Version27: Find upper bound for new V5-V26")
+        print("Version27: Hyper now generates parameters for BN in P branch")
 
     elif version == 29:
-        print("Version29: Contrast version with Version 5, deep copy in test function")
+        print("version29: comparison version, Hyper generates parameters for BN in P only")
 
     elif version == 30:
-        print("Version30: Other Feature extractors adapt to this domain")
+        print("version30: Hyper generates parameters for BN in P and G branch")
 
     elif version == 31:
-        print("Version31: Add bias for Shabby Adaptor")
-
-    elif version == 50:
-        print("Version50: logits level distillation for Version48")
-
-    elif version == 32:
-        print("Version32: Seperate Training dataset and Testing dataset in two phases for version 50")
-
-    elif version == 33:
-        print("Version33: Remove communication in finetuning phase in Version 32")
-
-    elif version == 34:
-        print("Version34: version18 + Validation set judge, KD")
+        print("Version31: comparison version, Hyper generates parameters for BN in P&G only")
 
     elif version == 35:
-        print("Version35: version34 + pretrained heads")
+        print("Version35: check the influence of running mean")
 
     elif version == 36:
-        print("Version36: version18 + mutual learning, KD")
-
-    elif version == 37:
-        print("Version37: version36 + pretrained heads")
-
-    elif version == 38:
-        print("Version38: Simulate KDCL-Linear to get teacher logits for G and P branch")
+        print("Version36: check the influence of running var")
 
     elif version == 39:
-        print("Version39: Introduce KD weight for version38")
+        print("Version39: aggregation, upper bound, g model accuracy")
 
     elif version == 40:
-        print("Version40: Generalize more on P branch with Shabby Adaptor")
+        print("Version40: aggregation, P head, approximation")
 
     elif version == 41:
-        print("Version41: Generalize more on P&G branch with Shabby Adaptor")
-
-    elif version == 42:
-        print("Version42: Generalize more on G branch with Shabby Adaptor")
-
-    elif version == 43:
-        print("Version43: Make series of trials on adaptor design based on version 15")
-        print("bootle_neck residual design")
-
-    elif version == 44:
-        print("Version44: Add l2 regularization for P branch in version 18")
+        print("Version41: aggregation, G head, approximation")
 
     elif version == 45:
-        print("Version45: Add l1 regularization for P branch in version 18")
-
-    elif version == 51:
-        print("Version51: Add Orthogonal Constraint for G and P branch")
-
-    elif version == 53:
-        print("Version53: Add Orthogonal Constraint for G branch")
+        print("Version45: Check the results after removing BNs for fedbn in classifier")
 
     elif version == 54:
-        print("Version54: Add Orthogonal Constraint for P branch")
+        print("Version54: keep full BNs for v48")
 
     elif version == 55:
-        print("Version55: Add Orthogonal Constraint for P branch with pretrained heads")
-
-    elif version == 56:
-        print("Version56: Add Orthogonal branch in branch to boost G branch")
+        print("Version55: keep full BNs for v49")
 
     elif version == 57:
-        print("Version57: Generalize on backup branch and personal branch")
+        print("Version57: keep full BNs for V47")
+
+    elif version == 50:
+        print("Version50: learnable softmax for P&G")
+
+    elif version == 51:
+        print("Version51: train learnable softmax after aggregation")
+
+    elif version == 52:
+        print("Version52: train learnable softmax after aggregation as calibration")
+
+    elif version == 53:
+        print("Version53: train learnable softmax after aggregation as plus calibration")
+
+    elif version == 58:
+        print("Version58: sharpen aggregation weight for V39")
+
+    elif version == 59:
+        print("Version59: sharpen aggregation weight for V40")
+
+    elif version == 60:
+        print("Version60: sharpen aggregation weight for V41")
+
+    elif version == 61:
+        print("Version61: remove P branch for V39")
 
     elif version == 62:
-        print("Check BN in version18, it seems we need to set spe_classifier eval() to keep the running mean and running var right")
-        print("Now V18 has been modified to be the same as V62, add spe_classifier.eval()")
+        print("Version62: remove P branch for V41")
+
+    elif version == 64:
+        print("Version64: remove P branch for V58")
 
     elif version == 65:
-        print("Version65: Classifier generalizes on BN")
-
-    elif version == 66:
-        print("Version66: V18 + V65")
-
-    elif version == 67:
-        print("Version67: V63 and now classifier is only one layer")
-
-    elif version == 68:
-        print("version68: V65 + V63")
-
-    elif version == 69:
-        print("Version69: V66 + V63")
-
-    elif version == 71:
-        print("Version71: Use validation set to learn linear combination layer")
-
-    elif version == 72:
-        print("Version72: use feature cosine distance to represent domain distance based on different BNs")
-
-    elif version == 73:
-        print("Version73: use logit cosine distance to represent domain distance based on different BNs")
-
-    elif version == 74:
-        print("Version74: V72 uses KL distance to replace cosine distance")
-
-    elif version == 75:
-        print("Version75: V73 uses KL distance to replace cosine distance")
+        print("Version65: remove P branch for V60")
