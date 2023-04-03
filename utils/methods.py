@@ -196,7 +196,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                     train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
                                                   a_optimizer, loss_fun, client_idx, device)
 
-            elif args.version in [47, 49, 55, 57]:
+            elif args.version in [47, 49, 55, 57, 90]:
                 if phase == 'Train':
                     train_loss, train_acc = train_gen_full_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
@@ -251,8 +251,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
 
             elif args.version in [87, 89]:
                 train_loss, train_acc = train_gen_full_kl_p_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
-
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)            
 
             else:
                 train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], Extra_modules, paggregation_models, train_loaders[client_idx], 

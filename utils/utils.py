@@ -42,7 +42,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                 models[client_idx].load_state_dict(copy.deepcopy(paggre_models[client_idx].state_dict()))
 
         elif args.mode.lower() == 'peer':
-            if args.version in [63, 76, 81, 45, 12, 54, 55, 56, 57, 71, 78, 79, 80, 82, 83, 88, 89]:
+            if args.version in [63, 76, 81, 45, 12, 54, 55, 56, 57, 71, 78, 79, 80, 82, 83, 88, 89, 90]:
                 for key in server_model.state_dict().keys():
                     if 'bn' not in key:
                         temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
@@ -230,7 +230,7 @@ def test(client_idx, model, p_model, a_model, extra_modules, data_loader, loss_f
     if args.mode in ['fedbn', 'fedavg', 'fedprox', 'local', 'fedtp', 'fedap', 'AlignFed', 'COPA']:
         test_loss, test_acc = normal_test(model, data_loader, loss_fun, device)
     elif args.mode == 'peer':
-        if args.version in [70, 76, 81, 33, 34, 42, 47, 15, 49, 57, 55, 73]:
+        if args.version in [70, 76, 81, 33, 34, 42, 47, 15, 49, 57, 55, 73, 90]:
             test_loss, test_acc = peer_test_lambda(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
         elif args.version in [2, 3, 4, 5, 6, 7, 8, 22, 23]:
             test_loss, test_acc = peer_test_KL(model, p_model, a_model, data_loader, loss_fun, device)

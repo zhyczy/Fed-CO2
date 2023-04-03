@@ -65,6 +65,7 @@ def others_train(version, model, p_model, Extra_modules, paggregation_models, tr
         a_optimizer = optim.SGD(params=paggregation_models[client_idx].parameters(), lr=args.lr)
         train_loss, train_acc = train_kl_1phase(model, p_model, paggregation_models[client_idx], train_loader, optimizer, 
                                           p_optimizer, a_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
+    
     elif version == 23:
         a_optimizer = optim.SGD(params=paggregation_models[client_idx].parameters(), lr=args.lr)
         train_loss, train_acc = train_kl_1phase_later(model, p_model, paggregation_models[client_idx], train_loader, 

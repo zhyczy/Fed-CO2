@@ -99,7 +99,7 @@ if __name__ == '__main__':
                             10, 11, 12, 13, 20, 22, 23, 24, 26, 35, 36, 37, 38, 39, 40, 
                             41, 42, 43, 44, 46, 47, 50, 51, 52, 53, 56, 57, 58, 59, 60,
                             61, 62, 64, 65, 66, 67, 68, 69, 71, 72, 73, 74, 75, 77, 78,
-                            79, 80, 82, 83, 84, 85, 86, 87, 88, 89]:
+                            79, 80, 82, 83, 84, 85, 86, 87, 88, 89, 90]:
             server_model = AlexNet().to(device)
         elif args.version in [45, 16, 19, 14, 15, 48, 49, 54, 55]:
             server_model = AlexNet_nocb().to(device)
@@ -266,11 +266,14 @@ if __name__ == '__main__':
         elif args.version == 89:
             print("Version89: P new KD, P&G generalize, personal BNs")
 
+        elif args.version == 90:
+            print("Version90: P&G new KD, P&G generalize, personal BNs, learn λ")
+
         else:
             definite_version(args.version)
 
 
-        if args.version in [70, 76, 81, 33, 34, 42, 47, 15, 49, 57, 55, 73]:
+        if args.version in [70, 76, 81, 33, 34, 42, 47, 15, 49, 57, 55, 73, 90]:
             meb = nn.Embedding(num_embeddings=1, embedding_dim=1).to(device)
             # print(meb.state_dict())
             meb.state_dict()['weight'].data.copy_(torch.zeros([1], dtype=torch.long))
@@ -404,7 +407,7 @@ if __name__ == '__main__':
             else:
                 server_model, models, global_prototypes = communication(args, server_model, models, personalized_models, extra_modules, paggregation_models, client_weights, proto_dict, a_iter)
 
-        if args.version in [70, 76, 81, 33, 34, 42, 47, 15, 49, 57, 55, 73]:
+        if args.version in [70, 76, 81, 33, 34, 42, 47, 15, 49, 57, 55, 73, 90]:
             assert args.mode == 'peer'
             train_loss, train_acc, _, _ = local_training(models, personalized_models, None, None, None, None, extra_modules, 
                                         None, None, args, None, val_loaders, None, loss_fun, device, a_iter=a_iter, phase='Valid')
