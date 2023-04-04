@@ -1,5 +1,7 @@
-python main.py  --mode peer --log --version 90
+# python main.py  --mode peer --log --version 90
 # python main.py  --mode peer --log --version 18  --dataset  office_home  --save_path ../checkpoint/office_home
+python main.py  --mode fedrod --log --version 1  --dataset  digits  --save_path ../checkpoint/digits
+
 # python experiment.py  --mode peer --log --version 18 --iters 2
 # python experiment.py  --mode peer --log --version 18  --dataset  office_home  --save_path ../checkpoint/office_home --iters 2
 

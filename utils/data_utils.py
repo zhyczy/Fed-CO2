@@ -156,22 +156,22 @@ def prepare_data_officeHome(args):
     webcam_valset = torch.utils.data.Subset(webcam_trainset, list(range(len(webcam_trainset)))[-val_len:]) 
     webcam_trainset = torch.utils.data.Subset(webcam_trainset, list(range(min_data_len)))
 
-    amazon_train_loader = torch.utils.data.DataLoader(amazon_trainset, batch_size=64, shuffle=True)
+    # amazon_train_loader = torch.utils.data.DataLoader(amazon_trainset, batch_size=64, shuffle=True)
     amazon_train_loader = torch.utils.data.DataLoader(amazon_trainset, batch_size=args.batch, shuffle=True)
     amazon_val_loader = torch.utils.data.DataLoader(amazon_valset, batch_size=args.batch, shuffle=False)
     amazon_test_loader = torch.utils.data.DataLoader(amazon_testset, batch_size=args.batch, shuffle=False)
 
-    caltech_train_loader = torch.utils.data.DataLoader(caltech_trainset, batch_size=64, shuffle=True)
+    # caltech_train_loader = torch.utils.data.DataLoader(caltech_trainset, batch_size=64, shuffle=True)
     caltech_train_loader = torch.utils.data.DataLoader(caltech_trainset, batch_size=args.batch, shuffle=True)
     caltech_val_loader = torch.utils.data.DataLoader(caltech_valset, batch_size=args.batch, shuffle=False)
     caltech_test_loader = torch.utils.data.DataLoader(caltech_testset, batch_size=args.batch, shuffle=False)
 
-    dslr_train_loader = torch.utils.data.DataLoader(dslr_trainset, batch_size=64, shuffle=True)
+    # dslr_train_loader = torch.utils.data.DataLoader(dslr_trainset, batch_size=64, shuffle=True)
     dslr_train_loader = torch.utils.data.DataLoader(dslr_trainset, batch_size=args.batch, shuffle=True)
     dslr_val_loader = torch.utils.data.DataLoader(dslr_valset, batch_size=args.batch, shuffle=False)
     dslr_test_loader = torch.utils.data.DataLoader(dslr_testset, batch_size=args.batch, shuffle=False)
 
-    webcam_train_loader = torch.utils.data.DataLoader(webcam_trainset, batch_size=64, shuffle=True)
+    # webcam_train_loader = torch.utils.data.DataLoader(webcam_trainset, batch_size=64, shuffle=True)
     webcam_train_loader = torch.utils.data.DataLoader(webcam_trainset, batch_size=args.batch, shuffle=True)
     webcam_val_loader = torch.utils.data.DataLoader(webcam_valset, batch_size=args.batch, shuffle=False)
     webcam_test_loader = torch.utils.data.DataLoader(webcam_testset, batch_size=args.batch, shuffle=False)
@@ -181,6 +181,83 @@ def prepare_data_officeHome(args):
     test_loaders = [amazon_test_loader, caltech_test_loader, dslr_test_loader, webcam_test_loader]
 
     return train_loaders, val_loaders, test_loaders
+
+
+def prepare_data_digits(args):
+    # Prepare data
+    transform_mnist = transforms.Compose([
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+    transform_svhn = transforms.Compose([
+            transforms.Resize([28,28]),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+    transform_usps = transforms.Compose([
+            transforms.Resize([28,28]),
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+    transform_synth = transforms.Compose([
+            transforms.Resize([28,28]),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+    transform_mnistm = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+    # MNIST
+    mnist_trainset     = DigitsDataset(data_path="data/digits/MNIST", channels=1, percent=args.percent, train=True,  transform=transform_mnist)
+    mnist_testset      = DigitsDataset(data_path="data/digits/MNIST", channels=1, percent=args.percent, train=False, transform=transform_mnist)
+
+    # SVHN
+    svhn_trainset      = DigitsDataset(data_path='data/digits/SVHN', channels=3, percent=args.percent,  train=True,  transform=transform_svhn)
+    svhn_testset       = DigitsDataset(data_path='data/digits/SVHN', channels=3, percent=args.percent,  train=False, transform=transform_svhn)
+
+    # USPS
+    usps_trainset      = DigitsDataset(data_path='data/digits/USPS', channels=1, percent=args.percent,  train=True,  transform=transform_usps)
+    usps_testset       = DigitsDataset(data_path='data/digits/USPS', channels=1, percent=args.percent,  train=False, transform=transform_usps)
+
+    # Synth Digits
+    synth_trainset     = DigitsDataset(data_path='data/digits/SynthDigits/', channels=3, percent=args.percent,  train=True,  transform=transform_synth)
+    synth_testset      = DigitsDataset(data_path='data/digits/SynthDigits/', channels=3, percent=args.percent,  train=False, transform=transform_synth)
+
+    # MNIST-M
+    mnistm_trainset    = DigitsDataset(data_path='data/digits/MNIST_M/', channels=3, percent=args.percent,  train=True,  transform=transform_mnistm)
+    mnistm_testset     = DigitsDataset(data_path='data/digits/MNIST_M/', channels=3, percent=args.percent,  train=False, transform=transform_mnistm)
+
+    min_data_len = min(len(mnist_trainset), len(svhn_trainset), len(usps_trainset), len(synth_trainset), len(mnistm_trainset))
+    print("Train data number: ", min_data_len)
+    # print(len(mnist_trainset))
+    # print(len(svhn_trainset))
+    # print(len(usps_trainset))
+    # print(len(synth_trainset))
+    # print(len(mnistm_trainset))
+
+    mnist_train_loader = torch.utils.data.DataLoader(mnist_trainset, batch_size=args.batch, shuffle=True)
+    mnist_test_loader  = torch.utils.data.DataLoader(mnist_testset, batch_size=args.batch, shuffle=False)
+    svhn_train_loader = torch.utils.data.DataLoader(svhn_trainset, batch_size=args.batch,  shuffle=True)
+    svhn_test_loader = torch.utils.data.DataLoader(svhn_testset, batch_size=args.batch, shuffle=False)
+    usps_train_loader = torch.utils.data.DataLoader(usps_trainset, batch_size=args.batch,  shuffle=True)
+    usps_test_loader = torch.utils.data.DataLoader(usps_testset, batch_size=args.batch, shuffle=False)
+    synth_train_loader = torch.utils.data.DataLoader(synth_trainset, batch_size=args.batch,  shuffle=True)
+    synth_test_loader = torch.utils.data.DataLoader(synth_testset, batch_size=args.batch, shuffle=False)
+    mnistm_train_loader = torch.utils.data.DataLoader(mnistm_trainset, batch_size=args.batch,  shuffle=True)
+    mnistm_test_loader = torch.utils.data.DataLoader(mnistm_testset, batch_size=args.batch, shuffle=False)
+
+    train_loaders = [mnist_train_loader, svhn_train_loader, usps_train_loader, synth_train_loader, mnistm_train_loader]
+    test_loaders  = [mnist_test_loader, svhn_test_loader, usps_test_loader, synth_test_loader, mnistm_test_loader]
+
+    return train_loaders, test_loaders
 
 
 class DigitsDataset(Dataset):

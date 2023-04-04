@@ -51,86 +51,9 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
         Specific_head = {}
         Specific_adaptor = {}
 
-        if args.version not in [1, 2, 6, 17, 24, 26, 21, 27, 29, 30, 31, 35, 36, 
-                                61, 62, 64, 65, 66, 67, 68, 71, 72, 73, 74, 75,
-                                77, 78, 79, 80]:
+        if args.version not in [1, 17, 66, 67, 68, 71, 73, 78, 79, 80]:
             for client_idx in range(client_num):
                 Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].classifier)
-
-        if args.version in [21, 27, 29, 30, 31]:
-            hnet.train()
-            h_optimizer = optim.SGD(params=hnet.parameters(), lr=args.lr)
-            criterion_ba = nn.CrossEntropyLoss().to(device)
-            arr = np.arange(client_num)
-            if args.version in [30, 31]:
-                weights, g_weights = hnet(torch.tensor([arr], dtype=torch.long).to(device), False)
-            else:
-                weights = hnet(torch.tensor([arr], dtype=torch.long).to(device), False)
-            if args.version in [29, 31]:
-                for client_idx in range(client_num):
-                    Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
-            else:
-                for client_idx in range(client_num):
-                    Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].head)
-                    Specific_head[client_idx].load_state_dict(weights[client_idx], strict=False)
-
-            if args.version in [30, 31]:
-                for client_idx, p_model in enumerate(personalized_models):
-                    private_params = weights[client_idx]
-                    invar_params = g_weights[client_idx]
-                    p_optimizer = optim.SGD(params=personalized_models[client_idx].parameters(), lr=args.lr)
-                    p_model.load_state_dict(private_params, strict=False)
-                    models[client_idx].load_state_dict(invar_params, strict=False)
-                    train_loss, train_acc = train_gen0_head(models[client_idx], p_model, train_loaders[client_idx], optimizers[client_idx], 
-                                                      p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-
-            else:
-                for client_idx, p_model in enumerate(personalized_models):
-                    private_params = weights[client_idx]
-                    p_optimizer = optim.SGD(params=personalized_models[client_idx].parameters(), lr=args.lr)
-                    p_model.load_state_dict(private_params, strict=False)
-                    train_loss, train_acc = train_gen0_head(models[client_idx], p_model, train_loaders[client_idx], optimizers[client_idx], 
-                                                      p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
-
-            for client_idx in range(client_num):
-                final_state = personalized_models[client_idx].state_dict()
-                node_weights = weights[client_idx]
-                inner_state = OrderedDict({k: tensor.data for k, tensor in node_weights.items()})
-                delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in node_weights.keys()})
-                hnet_grads = torch.autograd.grad(
-                    list(node_weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()), retain_graph=True, allow_unused=True
-                )
-
-                if client_idx == 0:
-                    grads_update = [1/client_num  for x in hnet_grads]
-                else:
-                    for g in range(len(hnet_grads)):
-                        if hnet_grads[g] == None:
-                            continue
-                        else:
-                            grads_update[g] += 1/client_num * hnet_grads[g]
-
-            if args.version in [30, 31]:
-                for client_idx in range(client_num):
-                    final_state = models[client_idx].state_dict()
-                    node_weights = g_weights[client_idx]
-                    inner_state = OrderedDict({k: tensor.data for k, tensor in node_weights.items()})
-                    delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in node_weights.keys()})
-                    hnet_grads = torch.autograd.grad(
-                        list(node_weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()), retain_graph=True, allow_unused=True
-                    )
-
-                    for g in range(len(hnet_grads)):
-                        if hnet_grads[g] == None:
-                            continue
-                        else:
-                            grads_update[g] += 1/client_num * hnet_grads[g]
-
-            h_optimizer.zero_grad()
-            for p, g in zip(hnet.parameters(), grads_update):
-                p.grad = g
-            h_optimizer.step()
-            return train_loss, train_acc, proto_dict, client_weight
 
     elif args.mode == 'COPA':
         Specific_head = {}
@@ -149,19 +72,19 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             p_optimizer = optim.SGD(params=personalized_models[client_idx].parameters(), lr=args.lr)
             criterion_ba = nn.CrossEntropyLoss().to(device)
     
-            if args.version in [17, 71, 72]:
+            if args.version in [17, 71]:
                 train_loss, train_acc = train_v0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                     p_optimizer, loss_fun, criterion_ba, device)
 
-            elif args.version in [18, 63, 32, 39, 40, 41, 16, 19, 58, 59, 60]:
+            elif args.version in [18, 63]:
                 train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
-            elif args.version in [69, 82, 84]:
+            elif args.version in [69, 82]:
                 train_loss, train_acc = train_gen_p(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
-            elif args.version in [25, 83, 85]:
+            elif args.version in [25, 83]:
                 train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
 
@@ -169,7 +92,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                           p_optimizer, loss_fun, criterion_ba, Extra_modules, client_idx, device)
 
-            elif args.version in [70, 76, 33]:
+            elif args.version in [70, 76]:
                 if phase == 'Train':
                     train_loss, train_acc = train_gen0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
@@ -178,7 +101,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                     train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
                                                   a_optimizer, loss_fun, client_idx, device)
 
-            elif args.version in [81, 34, 15]:
+            elif args.version == 81:
                 if phase == 'Train':
                     train_loss, train_acc = train_gen_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, device)
@@ -187,16 +110,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                     train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
                                                   a_optimizer, loss_fun, client_idx, device)
 
-            elif args.version == 42:
-                if phase == 'Train':
-                    train_loss, train_acc = train_gen_kl_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
-                elif phase == 'Valid':
-                    a_optimizer = optim.SGD(params=Extra_modules[client_idx].parameters(), lr=1)
-                    train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
-                                                  a_optimizer, loss_fun, client_idx, device)
-
-            elif args.version in [47, 49, 55, 57, 90]:
+            elif args.version in [57, 90]:
                 if phase == 'Train':
                     train_loss, train_acc = train_gen_full_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
@@ -205,34 +119,23 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                     train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
                                                   a_optimizer, loss_fun, client_idx, device)
 
-            elif args.version in [24, 26, 35, 36, 45, 14, 61, 62, 64, 65]:
-                train_loss, train_acc = train(model, train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
-
-            elif args.version in [37, 38]:
+            elif args.version == 37:
                 train_loss, train_acc = train_gen_kl_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
 
-            elif args.version == 43:
-                train_loss, train_acc = train_gen_full_kl_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
-
-            elif args.version == 44:
-                train_loss, train_acc = train_gen_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
-                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
-
-            elif args.version in [46, 48, 54, 56]:
+            elif args.version == 56:
                 train_loss, train_acc = train_gen_full_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
 
-            elif args.version in [66, 74, 78]:
+            elif args.version in [66, 78]:
                 train_loss, train_acc = train_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, a_iter, device)
 
-            elif args.version in [67, 75, 79]:
+            elif args.version in [67, 79]:
                 train_loss, train_acc = train_kl_g_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, a_iter, device)
 
-            elif args.version in [68, 77, 80]:
+            elif args.version in [68, 80]:
                 train_loss, train_acc = train_kl_p_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, a_iter, device)
 
@@ -245,11 +148,11 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                     train_loss, train_acc = train_valid_lambda(model, personalized_models[client_idx], Extra_modules[client_idx], test_loaders[client_idx],
                                                   a_optimizer, loss_fun, client_idx, device)
 
-            elif args.version in [86, 88]:
+            elif args.version == 88:
                 train_loss, train_acc = train_gen_full_kl_g_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
 
-            elif args.version in [87, 89]:
+            elif args.version == 89:
                 train_loss, train_acc = train_gen_full_kl_p_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)            
 
@@ -281,34 +184,6 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
 
         else:
             train_loss, train_acc = train(model, train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
-
-    if args.mode == 'peer':
-        if args.version in [39, 61]:
-            for client_idx, model in enumerate(models):
-                client_weight[client_idx] = weight_calculate(models, train_loaders[client_idx], loss_fun, client_num, device)
-        elif args.version == 40:
-            for client_idx in range(client_num):
-                Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].classifier)
-            for client_idx, model in enumerate(models):
-                client_weight[client_idx] = weight_calculate_approximate(model, Specific_head, train_loaders[client_idx], loss_fun, client_num, device)
-        elif args.version in [41, 62]:
-            for client_idx in range(client_num):
-                Specific_head[client_idx] = copy.deepcopy(models[client_idx].classifier)
-            for client_idx, model in enumerate(models):
-                client_weight[client_idx] = weight_calculate_approximate(model, Specific_head, train_loaders[client_idx], loss_fun, client_num, device)
-        elif args.version in [58, 64]:
-            for client_idx, model in enumerate(models):
-                client_weight[client_idx] = weight_calculate_sharpen(models, train_loaders[client_idx], loss_fun, client_num, device)
-        elif args.version == 59:
-            for client_idx in range(client_num):
-                Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].classifier)
-            for client_idx, model in enumerate(models):
-                client_weight[client_idx] = weight_calculate_approximate_sharpen(model, Specific_head, train_loaders[client_idx], loss_fun, client_num, device)
-        elif args.version in [60, 65]:
-            for client_idx in range(client_num):
-                Specific_head[client_idx] = copy.deepcopy(models[client_idx].classifier)
-            for client_idx, model in enumerate(models):
-                client_weight[client_idx] = weight_calculate_approximate_sharpen(model, Specific_head, train_loaders[client_idx], loss_fun, client_num, device, alpha=0.02)
 
     return train_loss, train_acc, proto_dict, client_weight
 
@@ -593,112 +468,6 @@ def train_kl_initialization_full(model, p_model, data_loader, optimizer, p_optim
     return loss_all / len(data_loader), correct/total
 
 
-def weight_calculate_approximate(model, Specific_heads, data_loader, loss_fun, client_num, device):
-    with torch.no_grad():
-        weight_list = []
-        model.eval()
-        for ccix in range(client_num):
-            ttt_model = copy.deepcopy(Specific_heads[ccix])
-            ttt_model.eval()
-            loss_all = 0
-            total = 0
-            correct = 0
-            for data, target in data_loader:
-                data = data.to(device)
-                target = target.to(device)
-                feature_g = model.produce_feature(data) 
-                output_client = ttt_model(feature_g)
-                # loss = loss_g(output_client, target)
-
-                # loss_all += loss.item()
-                total += target.size(0)
-                pred = output_client.data.max(1)[1]
-                correct += pred.eq(target.view(-1)).sum().item()
-            weight_list.append(correct/total)
-
-        acc_sum = sum(weight_list)
-        w_list = [x/acc_sum for x in weight_list]
-    return w_list
-
-
-def weight_calculate_approximate_sharpen(model, Specific_heads, data_loader, loss_fun, client_num, device, alpha=0.2):
-    with torch.no_grad():
-        weight_list = []
-        model.eval()
-        for ccix in range(client_num):
-            ttt_model = copy.deepcopy(Specific_heads[ccix])
-            ttt_model.eval()
-            loss_all = 0
-            total = 0
-            correct = 0
-            for data, target in data_loader:
-                data = data.to(device)
-                target = target.to(device)
-                feature_g = model.produce_feature(data) 
-                output_client = ttt_model(feature_g)
-
-                total += target.size(0)
-                pred = output_client.data.max(1)[1]
-                correct += pred.eq(target.view(-1)).sum().item()
-            weight_list.append(math.exp((correct/total)/alpha))
-
-        acc_sum = sum(weight_list)
-        w_list = [x/acc_sum for x in weight_list]
-    return w_list
-
-
-def weight_calculate(models, data_loader, loss_fun, client_num, device):
-    with torch.no_grad():
-        weight_list = []
-
-        for ccix in range(client_num):
-            ttt_model = copy.deepcopy(models[ccix])
-            ttt_model.eval()
-            loss_all = 0
-            total = 0
-            correct = 0
-            for data, target in data_loader:
-                data = data.to(device)
-                target = target.to(device)
-                output_g = ttt_model(data)
-                # loss = loss_g(output_g, target)
-
-                # loss_all += loss.item()
-                total += target.size(0)
-                pred = output_g.data.max(1)[1]
-                correct += pred.eq(target.view(-1)).sum().item()
-            weight_list.append(correct/total)
-
-        acc_sum = sum(weight_list)
-        w_list = [x/acc_sum for x in weight_list]
-    return w_list
-
-
-def weight_calculate_sharpen(models, data_loader, loss_fun, client_num, device):
-    with torch.no_grad():
-        weight_list = []
-
-        for ccix in range(client_num):
-            ttt_model = copy.deepcopy(models[ccix])
-            ttt_model.eval()
-            loss_all = 0
-            total = 0
-            correct = 0
-            for data, target in data_loader:
-                data = data.to(device)
-                target = target.to(device)
-                output_g = ttt_model(data)
-
-                total += target.size(0)
-                pred = output_g.data.max(1)[1]
-                correct += pred.eq(target.view(-1)).sum().item()
-            weight_list.append(math.exp((correct/total)/0.2))
-
-        acc_sum = sum(weight_list)
-        w_list = [x/acc_sum for x in weight_list]
-    return w_list
-
-
 def train_gen_full_kl_initialization_full(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):
     kl_loss = nn.KLDivLoss(reduction='batchmean')
     client_num = len(Specific_heads.keys())
@@ -762,76 +531,6 @@ def train_gen_full_kl_initialization_full(model, p_model, data_loader, optimizer
 
         p_optimizer.zero_grad()
         loss_p = loss_fun(output_p, target) + part3
-        loss_p.backward()
-        p_optimizer.step()
-
-        loss_all += loss_p.item()
-        total += target.size(0)
-        pred = (output_g.detach()+output_p).data.max(1)[1]
-        correct += pred.eq(target.view(-1)).sum().item()
-    return loss_all / len(data_loader), correct/total
-
-
-def train_gen_kl_initialization_full(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):
-    kl_loss = nn.KLDivLoss(reduction='batchmean')
-    client_num = len(Specific_heads.keys())
-    assert client_num != 0
-    l_lambda = 1/(client_num-1)
-    model.train()
-    p_model.train()
-
-    loss_all = 0
-    total = 0
-    correct = 0
-
-    if a_iter != 0:
-        back_g_model = copy.deepcopy(model)
-        back_g_model.eval()
-        back_p_model = copy.deepcopy(p_model)
-        back_p_model.eval()
-        for data, target in data_loader:
-            data = data.to(device)
-            target = target.to(device)
-            output_g = model(data)
-            output_p = p_model(data)
-
-            last_g = back_g_model(data)
-            last_p = back_p_model(data)
-
-            optimizer.zero_grad()
-            loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
-            loss.backward()
-            optimizer.step()
-
-            p_optimizer.zero_grad()
-            loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
-            loss_p.backward()
-            p_optimizer.step()
-
-    for data, target in data_loader:
-        data = data.to(device)
-        target = target.to(device)
-        feature_g = model.produce_feature(data)
-        output_g = model.classifier(feature_g)
-        feature_p = p_model.produce_feature(data)
-        output_p = p_model.classifier(feature_p)
-
-        optimizer.zero_grad()
-        part1 = loss_g(output_g, target)
-
-        part2 = 0
-        for idxx in range(client_num):
-            if idxx != client_idx:
-                Spe_classifier = Specific_heads[idxx]
-                Spe_classifier.eval()
-                output_gen = Spe_classifier(feature_g)
-                part2 += loss_g(output_gen, target)
-        loss = part1 + part2
-        loss.backward()
-        optimizer.step()
-
-        p_optimizer.zero_grad()
-        loss_p = loss_fun(output_p, target)
         loss_p.backward()
         p_optimizer.step()
 

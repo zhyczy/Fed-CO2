@@ -17,7 +17,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
     class_number = 10
     global_prototypes = {x:0 for x in range(class_number)}
     with torch.no_grad():
-        # aggregate params
+        # aggregate params   
         if args.mode.lower() == 'fedbn':
             for key in server_model.state_dict().keys():
                 if 'bn' not in key:
@@ -42,7 +42,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                 models[client_idx].load_state_dict(copy.deepcopy(paggre_models[client_idx].state_dict()))
 
         elif args.mode.lower() == 'peer':
-            if args.version in [63, 76, 81, 45, 12, 54, 55, 56, 57, 71, 78, 79, 80, 82, 83, 88, 89, 90]:
+            if args.version in [63, 76, 81, 56, 57, 71, 78, 79, 80, 82, 83, 88, 89, 90]:
                 for key in server_model.state_dict().keys():
                     if 'bn' not in key:
                         temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
@@ -51,84 +51,9 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                         server_model.state_dict()[key].data.copy_(temp)
                         for client_idx in range(client_num):
                             models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version in [39, 40, 41, 58, 59, 60, 61, 62, 64, 65]:
-                for client_idx in range(client_num):
-                    weight_list = client_weights[client_idx]
-                    for key in server_model.state_dict().keys():
-                        if 'running' not in key:
-                            if 'num_batches_tracked' in key:
-                                server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
-                            else:
-                                temp = torch.zeros_like(server_model.state_dict()[key])
-                                for client_jdx in range(client_num):
-                                    temp += weight_list[client_jdx] * models[client_jdx].state_dict()[key]
-                                server_model.state_dict()[key].data.copy_(temp)
-                                paggre_models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+            elif args.version in [46]:
                 for key in server_model.state_dict().keys():
                     if 'running' not in key:
-                        if 'num_batches_tracked' in key:
-                            continue
-                        else:
-                            for client_idx in range(client_num):
-                                models[client_idx].state_dict()[key].data.copy_(paggre_models[client_idx].state_dict()[key])
-            elif args.version in [2, 3, 4, 5, 6, 7, 8]:
-                for key in server_model.state_dict().keys():
-                    if 'num_batches_tracked' in key:
-                        server_model.state_dict()[key].data.copy_(paggre_models[0].state_dict()[key])
-                    else:
-                        temp = torch.zeros_like(server_model.state_dict()[key])
-                        for client_idx in range(client_num):
-                            temp += client_weights[client_idx] * paggre_models[client_idx].state_dict()[key]
-                        server_model.state_dict()[key].data.copy_(temp)
-                        for client_idx in range(client_num):
-                            models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version in [24, 32, 33, 34, 38, 42, 43, 44, 46, 47, 19, 15, 48, 49, 72, 74, 75, 77, 84, 85, 86, 87]:
-                for key in server_model.state_dict().keys():
-                    if 'running' not in key:
-                        if 'num_batches_tracked' in key:
-                            server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
-                        else:
-                            temp = torch.zeros_like(server_model.state_dict()[key])
-                            for client_idx in range(client_num):
-                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
-                            server_model.state_dict()[key].data.copy_(temp)
-                            for client_idx in range(client_num):
-                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version == 26:
-                for key in server_model.state_dict().keys():
-                    if 'num_batches_tracked' in key:
-                        server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
-                    else:
-                        if 'bn' in key:
-                            if 'running' in key:
-                                temp = torch.zeros_like(server_model.state_dict()[key])
-                                for client_idx in range(client_num):
-                                    temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
-                                server_model.state_dict()[key].data.copy_(temp)
-                                for client_idx in range(client_num):
-                                    models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-                        else:
-                            temp = torch.zeros_like(server_model.state_dict()[key])
-                            for client_idx in range(client_num):
-                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
-                            server_model.state_dict()[key].data.copy_(temp)
-                            for client_idx in range(client_num):
-                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version == 35:
-                for key in server_model.state_dict().keys():
-                    if 'running_mean' not in key:
-                        if 'num_batches_tracked' in key:
-                            server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
-                        else:
-                            temp = torch.zeros_like(server_model.state_dict()[key])
-                            for client_idx in range(client_num):
-                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
-                            server_model.state_dict()[key].data.copy_(temp)
-                            for client_idx in range(client_num):
-                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-            elif args.version == 36:
-                for key in server_model.state_dict().keys():
-                    if 'running_var' not in key:
                         if 'num_batches_tracked' in key:
                             server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
                         else:
@@ -230,22 +155,8 @@ def test(client_idx, model, p_model, a_model, extra_modules, data_loader, loss_f
     if args.mode in ['fedbn', 'fedavg', 'fedprox', 'local', 'fedtp', 'fedap', 'AlignFed', 'COPA']:
         test_loss, test_acc = normal_test(model, data_loader, loss_fun, device)
     elif args.mode == 'peer':
-        if args.version in [70, 76, 81, 33, 34, 42, 47, 15, 49, 57, 55, 73, 90]:
+        if args.version in [70, 76, 81, 57, 73, 90]:
             test_loss, test_acc = peer_test_lambda(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
-        elif args.version in [2, 3, 4, 5, 6, 7, 8, 22, 23]:
-            test_loss, test_acc = peer_test_KL(model, p_model, a_model, data_loader, loss_fun, device)
-        elif args.version in [21, 27, 29]:
-            test_loss, test_acc = peer_test_hyper(model, p_model, hnet, data_loader, loss_fun, client_idx, device)
-        elif args.version in [30, 31]:
-            test_loss, test_acc = peer_test_hyper_special(model, p_model, hnet, data_loader, loss_fun, client_idx, device)
-        elif args.version in [24, 26, 35, 36, 45, 14, 61, 62, 64, 65]:
-            test_loss, test_acc = normal_test(model, data_loader, loss_fun, device)
-        elif args.version == 20:
-            test_loss, test_acc = peer_test_softmax_normal(model, p_model, data_loader, loss_fun, device)
-        elif args.version in [50, 51, 52, 53]:
-            test_loss, test_acc = peer_test_softmax_learnable(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
-        elif args.version in [12, 13]:
-            test_loss, test_acc = normal_test_softmax(model, data_loader, loss_fun, device)
         else:
             test_loss, test_acc = peer_test(model, p_model, data_loader, loss_fun, device)
     elif args.mode == 'fedper':
@@ -255,12 +166,6 @@ def test(client_idx, model, p_model, a_model, extra_modules, data_loader, loss_f
     elif args.mode == 'fedtp':
         test_loss, test_acc = fedtp_test(client_idx, model, hnet, data_loader, loss_fun, device)
     return test_loss, test_acc
-
-
-def softmax_sharp(x, tau=1):
-    x_exp = torch.exp(x/tau)
-    x_sum = torch.sum(x_exp, dim=1).view(-1,1)
-    return x_exp/x_sum
 
 
 def euclidean_dist(x, y):
