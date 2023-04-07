@@ -27,7 +27,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                     server_model.state_dict()[key].data.copy_(temp)
                     for client_idx in range(client_num):
                         models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
-        
+
         elif args.mode.lower() == 'fedap':
             for cl in range(client_num):
                 for key in server_model.state_dict().keys():
@@ -152,7 +152,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
 
 
 def test(client_idx, model, p_model, a_model, extra_modules, data_loader, loss_fun, device, args, hnet, global_prototype, flog=False):
-    if args.mode in ['fedbn', 'fedavg', 'fedprox', 'local', 'fedtp', 'fedap', 'AlignFed', 'COPA']:
+    if args.mode in ['fedbn', 'fedavg', 'fedprox', 'local', 'fedtp', 'fedap', 'AlignFed', 'COPA', 'moon']:
         test_loss, test_acc = normal_test(model, data_loader, loss_fun, device)
     elif args.mode == 'peer':
         if args.version in [70, 76, 81, 57, 73, 90]:

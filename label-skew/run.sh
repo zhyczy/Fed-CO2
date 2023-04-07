@@ -12,6 +12,7 @@ python experiments.py --model=cnn-b \
   --eval_step=1 \
   --rho=0.9 \
   --version=1 \
+  --kl_epochs=5 \
   --partition=noniid-labeldir100\
   --beta=0.3\
   --device='cuda:0'\

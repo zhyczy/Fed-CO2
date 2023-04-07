@@ -24,10 +24,7 @@ from models.Hypernetworks import ViTHyper, ProtoHyper, ShakesHyper, Layer_ViTHyp
 from models.cnn import CNNHyper, CNNTarget, CNN_B
 from models.knn_per import Mobilenet, NextCharacterLSTM
 from models.language_transformer import Transformer
-from model import *
 from utils import *
-from vggmodel import *
-from resnetcifar import *
 from methods.method import *
 
 def get_args():
@@ -54,7 +51,7 @@ def get_args():
     parser.add_argument('--device', type=str, default='cpu', help='The device to run the program')
     parser.add_argument('--log_file_name', type=str, default=None, help='The log file name')
     parser.add_argument('--optimizer', type=str, default='sgd', help='the optimizer')
-    parser.add_argument('--mu', type=float, default=1, help='the mu parameter for fedprox')
+    parser.add_argument('--mu', type=float, default=1, help='the mu parameter for fedprox or moon')
     parser.add_argument('--noise', type=float, default=0, help='how much noise we add to some party')
     parser.add_argument('--noise_type', type=str, default='None', help='Different level of noise or different space of noise')
     parser.add_argument('--rho', type=float, default=0, help='Parameter controlling the momentum SGD')
@@ -125,6 +122,18 @@ def get_args():
     """
     parser.add_argument('--fedproto_lambda', default=0.1)
 
+    """
+    Used for moon
+    temperature is 0.5 by default
+    """
+    parser.add_argument('--temperature', type=float, default=0.5, help='the temperature parameter for contrastive loss')
+
+    """
+    Used for pFedKL
+    temperature is 0.5 by default
+    """
+    parser.add_argument('--kl_epochs', type=int, default=1)
+
     args = parser.parse_args()
     return args
 
@@ -135,40 +144,11 @@ def init_nets(net_configs, dropout_p, n_parties, args):
     device = torch.device(args.device)
 
     for net_i in range(n_parties):
-        if args.dataset == "generated":
-            net = PerceptronModel()
-        
-        elif args.model == "mlp":
-            if args.dataset == 'covtype':
-                input_size = 54
-                output_size = 2
-                hidden_sizes = [32,16,8]
-            elif args.dataset == 'a9a':
-                input_size = 123
-                output_size = 2
-                hidden_sizes = [32,16,8]
-            elif args.dataset == 'rcv1':
-                input_size = 47236
-                output_size = 2
-                hidden_sizes = [32,16,8]
-            elif args.dataset == 'SUSY':
-                input_size = 18
-                output_size = 2
-                hidden_sizes = [16,8]
-            net = FcNet(input_size, hidden_sizes, output_size, dropout_p)
-        
-        elif args.model == "vgg":
-            net = vgg11()
-        
-        elif args.model == "simple-cnn":
+        if args.model == "simple-cnn":
             if args.dataset in ("cifar10", "cinic10", "svhn"):
                 net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=10)
             elif args.dataset in ("cifar100"):
                 net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=100)
-            elif args.dataset in ("mnist", 'femnist', 'fmnist'):
-                net = SimpleCNNMNIST(input_dim=(16 * 4 * 4), hidden_dims=[120, 84], output_dim=10)
-            elif args.dataset == 'celeba':
-                net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=2)
         
         elif args.model == "vit":
             if args.dataset == "cifar10":
@@ -190,52 +170,11 @@ def init_nets(net_configs, dropout_p, n_parties, args):
             elif args.dataset == "cifar100":
                 net = CNN_B(n_kernels=16, out_dim=100)
 
-        elif args.model == "vgg-9":
-            if args.dataset in ("mnist", 'femnist'):
-                net = ModerateCNNMNIST()
-            elif args.dataset in ("cifar10", "cinic10", "svhn"):
-                net = ModerateCNN()
-            elif args.dataset == 'celeba':
-                net = ModerateCNN(output_dim=2)
-        
-        elif args.model == "resnet":
-            net = ResNet50_cifar10()
-
-        elif args.model == "vgg16":
-            net = vgg16()
-
         elif args.model == "mobilent":
             if args.dataset == "cifar10":
                 net = Mobilenet(n_classes=10, pretrained=True)
             elif args.dataset == "cifar100":
                 net = Mobilenet(n_classes=100, pretrained=True)
-
-        elif args.model == "lstm":
-            # "input_size": len(string.printable),
-            # "embed_size": 8, "hidden_size": 256,
-            # "output_size": len(string.printable),
-            # "n_layers": 2, "chunk_len": 80
-            net = NextCharacterLSTM(
-                input_size=SHAKESPEARE_CONFIG["input_size"],
-                embed_size=SHAKESPEARE_CONFIG["embed_size"],
-                hidden_size=SHAKESPEARE_CONFIG["hidden_size"],
-                output_size=SHAKESPEARE_CONFIG["output_size"],
-                n_layers=SHAKESPEARE_CONFIG["n_layers"])
-
-        elif args.model == "transformer":
-            # -b 256 -warmup 128000 -epoch 400
-            # '-d_model', type=int, default=512
-            # '-d_inner_hid', type=int, default=2048
-            # '-d_k', type=int, default=64
-            # '-d_v', type=int, default=64
-            # '-n_head', type=int, default=8
-            # '-n_layers', type=int, default=6
-            # 'scale_emb_or_prj', type=str, default='prj'
-            net = Transformer(n_src_vocab=len(string.printable), 
-            n_trg_vocab=len(string.printable),
-            d_k=64, d_v=64, d_model=128,
-            d_word_vec=128, d_inner=256,
-            n_layers=args.depth, n_head=8, dropout=0.1)
 
         else:
             raise NotImplementedError("not supported yet")
@@ -294,18 +233,6 @@ def init_hyper(args, sam_node=None):
             hnet = CNNHyper(args.n_parties, embed_dim, hidden_dim=args.hyper_hid,
                             n_hidden=args.n_hidden, n_kernels=16, out_dim=100)
 
-    elif args.model == "transformer":
-        if args.dataset != "shakespeare":
-            raise NotImplementedError("ShakesHyper only supports shakespeare dataset.")
-        if args.layer_emd:
-            hnet = Layer_ShakesHyper(args.n_parties, embed_dim, hidden_dim = args.hyper_hid, dim=128, 
-            heads = 8, dim_head = 64, n_hidden = args.n_hidden, 
-            depth=args.depth, client_sample=sam_node, device=args.device)
-        else:
-            hnet = ShakesHyper(args.n_parties, embed_dim, hidden_dim = args.hyper_hid, dim=128, 
-            heads = 8, dim_head = 64, n_hidden = args.n_hidden, 
-            depth=args.depth, client_sample=sam_node)
-
     return hnet
 
 
@@ -314,8 +241,6 @@ def init_personalized_parameters(args, client_number=None):
     if args.dataset == "cifar10":
         class_num = 10
     elif args.dataset == "cifar100":
-        class_num = 100
-    elif args.dataset == "shakespeare":
         class_num = 100
 
     if args.alg == 'perVit' or args.alg == 'protoVit':
@@ -388,7 +313,7 @@ def init_personalized_parameters(args, client_number=None):
                 para_dict["decoder.bias"] = None
                 personalized_pred_list.append(para_dict)
 
-    elif args.alg in ['fedBN', 'fedAP', 'pfedKL']:
+    elif args.alg in ['fedBN', 'fedAP', 'pfedKL', 'pfedKL-abl']:
         for nndx in range(args.n_parties):
             bn_dict = OrderedDict()
             for ll in range(4):
@@ -474,20 +399,11 @@ if __name__ == '__main__':
             logging.info("Use linear Fed-Rod.")
     if args.test_round<=1:
         raise NotImplementedError("test round should be larger than 1")
+    logging.info("Knowledge Distillation epoch number: %d" %args.kl_epochs)
 
     save_path = args.alg+"-"+args.model+"-"+str(args.n_parties)+"-"+args.dataset+"-"+args.partition+args.comment
     mkdirs(args.modeldir)
     device = torch.device(args.device)
-
-    if args.calibrated or args.k_neighbor:
-        if args.alg not in ['protoVit','hyperVit','fedavg','knn-per']:
-            raise NotImplementedError("Calibration and Memory do not support this alg.")
-        if args.calibrated and args.k_neighbor:
-            raise NotImplementedError("Calibration and Memory can not be applied in the same time.")
-        logging.info("Calibrated: %s" % args.calibrated)
-        logging.info("lambda: %f" % args.lambda_value)
-        logging.info("no_mlp_head: %s" % args.no_mlp_head)
-        logging.info("Use memory: %s" % args.k_neighbor)
 
     mkdirs(args.logdir)
     if args.log_file_name is None:
@@ -626,283 +542,11 @@ if __name__ == '__main__':
         else:
             accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
             
-        print("test_all_acc: ", test_all_acc)
+        # print("test_all_acc: ", test_all_acc)
         if args.save_model:
             logger.info("Saving model")
             outfile_gmodel = os.path.join(save_path, 'gmodel_1500.tar')
             torch.save({'epoch':args.comm_round+1, 'state':global_model.state_dict()}, outfile_gmodel)
-
-        json_file_opt = "results_"+accessories+".json"
-        with open(str(save_path / json_file_opt), "w") as file:
-            json.dump(results_dict, file, indent=4)
-
-    elif args.alg == 'hyperVit':
-        if args.model not in ["vit", "transformer"]:
-            raise NotImplementedError("hyperVit only supports ViT and transformer")
-
-        logger.info("Initializing nets")
-        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-
-        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
-        global_model = global_models[0]
-
-        logger.info("Initializing hyper")
-        if args.dataset == "shakespeare":
-            sam_node = int(args.n_parties * args.sample)
-            hnet = init_hyper(args, sam_node).to(device)
-        else:
-            hnet = init_hyper(args).to(device)
-
-        optimizers = {
-            'sgd': torch.optim.SGD(
-                params=hnet.parameters(), lr=args.lr, momentum=0.9, weight_decay=1e-3
-            ),
-            'adam': torch.optim.Adam(params=hnet.parameters(), lr=args.lr)
-        }
-        optimizer = optimizers['sgd']
-
-
-        global_para = global_model.state_dict()
-        if args.is_same_initial:
-            for net_id, net in nets.items():
-                net.load_state_dict(global_para)
-
-        for round in range(args.comm_round):
-            logger.info("in comm round: %d" %round)
-
-            hnet.train()
-            grads_update = []
-
-            arr = np.arange(args.n_parties)
-            np.random.shuffle(arr)
-            selected = arr[:int(args.n_parties * args.sample)]
-            weights = hnet(torch.tensor([selected], dtype=torch.long).to(device),False)
-
-            global_para = global_model.state_dict()
-            if round == 0:
-                if args.is_same_initial:
-                    for ix in range(len(selected)):
-                        node_weights = weights[ix]
-                        idx = selected[ix]
-                        nets[idx].load_state_dict(global_para)
-                        nets[idx].load_state_dict(node_weights,strict=False)
-            else:
-                for ix in range(len(selected)):
-                    node_weights = weights[ix]
-                    idx = selected[ix]
-                    nets[idx].load_state_dict(global_para)
-                    nets[idx].load_state_dict(node_weights,strict=False)
-
-            if args.dataset == 'shakespeare':
-                local_train_net_per(nets, selected, args, train_dl_global, test_dl_global, logger, device=device)
-            else:
-                local_train_net_per(nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, logger, device=device)
-
-            # update global model
-            if args.dataset == 'shakespeare':
-                instance_number_per_client = [len(train_dl_global[r].dataset) for r in selected]
-                total_data_points = sum(instance_number_per_client)
-                fed_avg_freqs = [instance_number_per_client[r] / total_data_points for r in range(len(instance_number_per_client))]
-            else:
-                total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
-                fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
-
-            for idx in range(len(selected)):
-                final_state = nets[selected[idx]].state_dict()
-                net_para = nets[selected[idx]].state_dict()
-
-                node_weights = weights[idx]
-                inner_state = OrderedDict({k: tensor.data for k, tensor in node_weights.items()})
-                delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in node_weights.keys()})
-                hnet_grads = torch.autograd.grad(
-                    list(node_weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()), retain_graph=True
-                )
-
-                if idx == 0:
-                    for key in net_para:
-                        global_para[key] = net_para[key] * fed_avg_freqs[idx]
-                    grads_update = [fed_avg_freqs[idx]*x  for x in hnet_grads]
-                else:
-                    for key in net_para:
-                        global_para[key] += net_para[key] * fed_avg_freqs[idx]
-                    for g in range(len(hnet_grads)):
-                        grads_update[g] += fed_avg_freqs[idx] * hnet_grads[g]
-
-            global_model.load_state_dict(global_para)
-            optimizer.zero_grad()
-            for p, g in zip(hnet.parameters(), grads_update):
-                p.grad = g
-            optimizer.step()
-
-            if args.dataset == "cifar10":
-                num_class = 10
-            elif args.dataset == "cifar100":
-                num_class = 100
-
-            if (round+1)>=test_round and (round+1)%eval_step == 0:
-                # train_results, train_avg_loss, train_acc, train_all_acc = compute_accuracy_per_client(hnet, global_model, args, net_dataidx_map_train,test=False, device=device)
-                # test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client(hnet, global_model, args, net_dataidx_map_train, device=device)
-                if args.dataset == 'shakespeare':
-                    train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client(
-                    hnet, nets, global_model, args, train_dl_global, test_dl_global, 0, device=device)
-                else:
-                    train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client(
-                    hnet, nets, global_model, args, net_dataidx_map_train, net_dataidx_map_test, num_class, device=device)
-                
-                if args.log_flag:
-                    logger.info('>> Global Model Train accuracy: %f' % train_acc)
-                    logger.info('>> Global Model Test accuracy: %f' % test_acc)
-                    logger.info('>> Test avg loss: %f' %test_avg_loss)
-
-                results_dict['train_avg_loss'].append(train_avg_loss)
-                results_dict['train_avg_acc'].append(train_acc)
-                results_dict['test_all_acc'] = test_all_acc
-                results_dict['test_avg_loss'].append(test_avg_loss)
-                results_dict['test_avg_acc'].append(test_acc*100)
-
-        save_path = Path("results_table/"+save_path)
-        save_path.mkdir(parents=True, exist_ok=True)
-
-        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
-        
-        if args.save_model:
-            logger.info("Saving model")
-            outfile_hp = os.path.join(save_path,  'HY_1500.tar')
-            outfile_vit = os.path.join(save_path, 'Vit_1500.tar')
-            torch.save({'epoch':args.comm_round+1, 'state':hnet.state_dict()}, outfile_hp)
-            torch.save({'epoch':args.comm_round+1, 'state':global_model.state_dict()}, outfile_vit)
-
-        json_file_opt = "results_"+accessories+".json"
-        with open(str(save_path / json_file_opt), "w") as file:
-            json.dump(results_dict, file, indent=4)
-
-    elif args.alg == 'perVit':
-        if args.model not in  ["vit", "transformer"]:
-            raise NotImplementedError("perVit only supports ViT and transformer")
-
-        logger.info("Initializing nets")
-        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-
-        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
-        global_model = global_models[0]
-        global_para = global_model.state_dict()
-
-        logger.info("Initializing Personalized QKV heads")
-        if args.dataset == "shakespeare":
-            client_number = int(args.n_parties)
-            personalized_kqv_list = init_personalized_parameters(args, client_number)
-        else:
-            personalized_kqv_list = init_personalized_parameters(args)
-
-        if args.is_same_initial:
-            for net_id, net in nets.items():
-                net.load_state_dict(global_para)
-
-        for round in range(args.comm_round):
-            logger.info("in comm round: %d" % round)
-
-            arr = np.arange(args.n_parties)
-            np.random.shuffle(arr)
-            selected = arr[:int(args.n_parties * args.sample)]
-
-            global_para = global_model.state_dict()
-            if round == 0:
-                if args.is_same_initial:
-                    for ix in range(len(selected)):
-                        idx = selected[ix]
-                        nets[idx].load_state_dict(global_para)
-            else:
-                for ix in range(len(selected)):
-                    idx = selected[ix]
-                    node_weights = personalized_kqv_list[idx]
-                    nets[idx].load_state_dict(global_para)
-                    nets[idx].load_state_dict(node_weights,strict=False)
-
-            if args.dataset == 'shakespeare':
-                local_train_net_per(nets, selected, args, train_dl_global, test_dl_global, logger, device=device)
-            else:
-                local_train_net_per(nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, logger, device=device)
-
-            # update global model
-            if args.dataset == 'shakespeare':
-                instance_number_per_client = [len(train_dl_global[r].dataset) for r in selected]
-                total_data_points = sum(instance_number_per_client)
-                fed_avg_freqs = [instance_number_per_client[r] / total_data_points for r in range(len(instance_number_per_client))]
-            else:
-                total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
-                fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
-
-            if round == 0:
-                for iidx in range(args.n_parties):
-                    final_state = nets[iidx].state_dict()
-                    for ll in range(args.depth):
-                        if args.dataset=="shakespeare":
-                            personalized_kqv_list[iidx]["encoder.layer_stack."+str(ll)+".slf_attn.w_qs.weight"] = copy.deepcopy(final_state["encoder.layer_stack."+str(ll)+".slf_attn.w_qs.weight"])
-                            personalized_kqv_list[iidx]["encoder.layer_stack."+str(ll)+".slf_attn.w_ks.weight"] = copy.deepcopy(final_state["encoder.layer_stack."+str(ll)+".slf_attn.w_ks.weight"])
-                            personalized_kqv_list[iidx]["encoder.layer_stack."+str(ll)+".slf_attn.w_vs.weight"] = copy.deepcopy(final_state["encoder.layer_stack."+str(ll)+".slf_attn.w_vs.weight"])
-                        else:
-                            personalized_kqv_list[iidx]["transformer.layers."+str(ll)+".0.fn.to_qkv.weight"] = copy.deepcopy(final_state["transformer.layers."+str(ll)+".0.fn.to_qkv.weight"])
-
-            for idx in range(len(selected)):
-                if round != 0:
-                    final_state = copy.deepcopy(nets[selected[idx]].state_dict())
-                    for ll in range(args.depth):
-                        if args.dataset=="shakespeare":
-                            personalized_kqv_list[selected[idx]]["encoder.layer_stack."+str(ll)+".slf_attn.w_qs.weight"] = copy.deepcopy(final_state["encoder.layer_stack."+str(ll)+".slf_attn.w_qs.weight"])
-                            personalized_kqv_list[selected[idx]]["encoder.layer_stack."+str(ll)+".slf_attn.w_ks.weight"] = copy.deepcopy(final_state["encoder.layer_stack."+str(ll)+".slf_attn.w_ks.weight"])
-                            personalized_kqv_list[selected[idx]]["encoder.layer_stack."+str(ll)+".slf_attn.w_vs.weight"] = copy.deepcopy(final_state["encoder.layer_stack."+str(ll)+".slf_attn.w_vs.weight"])
-                        else:
-                            # wq, wk, wv = final_state["transformer.layers."+str(ll)+".0.fn.to_qkv.weight"].chunk(3)
-                            # if idx == 0 and ll==0:
-                            #     print("Net: ", selected[idx])
-                            #     print("Level: ",ll+1)
-                            #     print("WQ: ", wq)
-                            #     print("WK: ", wk)
-                            #     print("WV: ", wv)
-                            personalized_kqv_list[selected[idx]]["transformer.layers."+str(ll)+".0.fn.to_qkv.weight"] = copy.deepcopy(final_state["transformer.layers."+str(ll)+".0.fn.to_qkv.weight"])
-                net_para = nets[selected[idx]].state_dict()
-
-                if idx == 0:
-                    for key in net_para:
-                        global_para[key] = net_para[key] * fed_avg_freqs[idx]
-                else:
-                    for key in net_para:
-                        global_para[key] += net_para[key] * fed_avg_freqs[idx]
-
-            global_model.load_state_dict(global_para)
-
-            if (round+1)>=test_round and (round+1)%eval_step == 0:
-                # train_results, train_avg_loss, train_acc, train_all_acc = compute_accuracy_personally(personalized_kqv_list, global_model, args, net_dataidx_map_train,test=False, device=device)
-                # test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_personally(personalized_kqv_list, global_model, args, net_dataidx_map_train, device=device)
-                if args.dataset == "shakespeare":
-                    train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_personally(
-                    personalized_kqv_list, global_model, args, train_dl_global, test_dl_global, nets, round, device=device)
-                else:
-                    train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_personally(
-                    personalized_kqv_list, global_model, args, net_dataidx_map_train, net_dataidx_map_test, nets, round, device=device)
-
-                if args.log_flag:
-                    logger.info('>> Global Model Train accuracy: %f' % train_acc)
-                    logger.info('>> Global Model Test accuracy: %f' % test_acc)
-                    logger.info('>> Test avg loss: %f' %test_avg_loss)
-
-                results_dict['train_avg_loss'].append(train_avg_loss)
-                results_dict['train_avg_acc'].append(train_acc)
-                results_dict['test_avg_loss'].append(test_avg_loss)
-                results_dict['test_avg_acc'].append(test_acc*100)
-
-        save_path = Path("results_table/"+save_path)
-        save_path.mkdir(parents=True, exist_ok=True)
-
-        accessories = args.alg + "-" + str(args.n_parties) + "-" + args.dataset + "-" + args.partition + "-" + args.comment
-        
-        if args.save_model:
-            logger.info("Saving model")
-            outfile_vit = os.path.join(save_path, 'Vit_1500.tar')
-            torch.save({'epoch':args.comm_round+1, 'state':global_model.state_dict()}, outfile_vit)
-            for ele in range(len(personalized_kqv_list)):
-                p_qkv = os.path.join(save_path, 'QKV_1500_'+str(ele)+".tar")
-                torch.save({'epoch':args.comm_round+1, 'state':personalized_kqv_list[ele]}, p_qkv)
 
         json_file_opt = "results_"+accessories+".json"
         with open(str(save_path / json_file_opt), "w") as file:
@@ -1588,34 +1232,120 @@ if __name__ == '__main__':
         with open(str(save_path / json_file_opt), "w") as file:
             json.dump(results_dict, file, indent=4)
 
+    elif args.alg == 'pfedKL-abl':
+        if args.model != 'cnn-b':
+            raise NotImplementedError("pfedKL-abl uses cnn-b with BN.")
+        logger.info("Initializing nets")
+
+        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
+        local_nets, _, _ = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
+        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
+        global_model = global_models[0]
+
+        global_para = global_model.state_dict()
+
+        logger.info("Initializing Personalized BN layer")
+        personalized_bn_list = init_personalized_parameters(args)
+
+        if args.is_same_initial:
+            for net_id, net in nets.items():
+                net.load_state_dict(global_para)
+
+        for a_iter in range(args.comm_round):
+            logger.info("in comm round: %d" %a_iter)
+
+            arr = np.arange(args.n_parties)
+            np.random.shuffle(arr)
+            selected = arr[:int(args.n_parties * args.sample)]
+
+            global_para = global_model.state_dict()
+            if a_iter == 0:
+                if args.is_same_initial:
+                    for idx in selected:
+                        nets[idx].load_state_dict(global_para)
+            else:
+                for idx in selected:
+                    node_weights = personalized_bn_list[idx]
+                    nets[idx].load_state_dict(global_para)
+                    nets[idx].load_state_dict(node_weights, strict=False)
+
+            local_train_net_per_2branch(nets, local_nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, a_iter, logger, device=device)
+
+            # update global model
+            total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
+            fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
+
+            if a_iter == 0:
+                for iidx in range(args.n_parties):
+                    final_state = copy.deepcopy(nets[iidx].state_dict())
+                    for ll in range(4):
+                        personalized_bn_list[iidx]["bn"+str(ll+1)+".weight"] = copy.deepcopy(final_state["bn"+str(ll+1)+".weight"])
+                        personalized_bn_list[iidx]["bn"+str(ll+1)+".bias"] = copy.deepcopy(final_state["bn"+str(ll+1)+".bias"])
+           
+            for idx in range(len(selected)):
+                if a_iter != 0:
+                    final_state = copy.deepcopy(nets[selected[idx]].state_dict())
+                    for ll in range(4):
+                        personalized_bn_list[selected[idx]]["bn"+str(ll+1)+".weight"] = copy.deepcopy(final_state["bn"+str(ll+1)+".weight"])
+                        personalized_bn_list[selected[idx]]["bn"+str(ll+1)+".bias"] = copy.deepcopy(final_state["bn"+str(ll+1)+".bias"])
+                
+                net_para = nets[selected[idx]].state_dict()               
+                if idx == 0:
+                    for key in net_para:
+                        global_para[key] = net_para[key] * fed_avg_freqs[idx]
+                else:
+                    for key in net_para:
+                        global_para[key] += net_para[key] * fed_avg_freqs[idx]
+
+            global_model.load_state_dict(global_para)
+
+            if (a_iter+1)>=test_round and (a_iter+1)%eval_step == 0: 
+                
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_two_branch(
+                personalized_bn_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
+
+                if args.log_flag:
+                    logger.info('>> Global Model Train accuracy: %f' % train_acc)
+                    logger.info('>> Global Model Test accuracy: %f' % test_acc)
+                    logger.info('>> Test avg loss: %f' %test_avg_loss)
+
+                results_dict['train_avg_loss'].append(train_avg_loss)
+                results_dict['train_avg_acc'].append(train_acc)
+                results_dict['test_avg_loss'].append(test_avg_loss)
+                results_dict['test_avg_acc'].append(test_acc*100)
+
+        save_path = Path("results_table/"+save_path)
+        save_path.mkdir(parents=True, exist_ok=True)
+  
+        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
+
+        if args.save_model:
+            logger.info("Saving model")
+            outfile_gmodel = os.path.join(save_path, 'gmodel_1500.tar')
+            torch.save({'epoch':args.comm_round+1, 'state':global_model.state_dict()}, outfile_gmodel)
+            for ele in range(len(personalized_bn_list)):
+                p_head = os.path.join(save_path, 'phead_1500_'+str(ele)+".tar")
+                torch.save({'epoch':args.comm_round+1, 'state':personalized_bn_list[ele]}, p_head)
+
+        json_file_opt = "results_"+accessories+".json"
+        with open(str(save_path / json_file_opt), "w") as file:
+            json.dump(results_dict, file, indent=4)
+
     elif args.alg == 'moon':
         logger.info("Initializing nets")
-        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.n_parties, args, device='cpu')
+        # nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.n_parties, args, device='cpu')
 
-        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 1, args, device='cpu')
-        global_model = global_models[0]
+        # global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 1, args, device='cpu')
+        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
+
+        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
+        global_model = global_models[0].to(device)
         n_comm_rounds = args.comm_round
-
-        # if args.server_momentum:
-        #     moment_v = copy.deepcopy(global_model.state_dict())
-        #     for key in moment_v:
-        #         moment_v[key] = 0
-
-        old_nets_pool = []
-        # if args.load_pool_file:
-        #     for nets_id in range(args.model_buffer_size):
-        #         old_nets, _, _ = init_nets(args.net_config, args.n_parties, args, device='cpu')
-        #         checkpoint = torch.load(args.load_pool_file)
-        #         for net_id, net in old_nets.items():
-        #             net.load_state_dict(checkpoint['pool' + str(nets_id) + '_'+'net'+str(net_id)])
-        #         old_nets_pool.append(old_nets)
-        # elif args.load_first_net:
-        #     if len(old_nets_pool) < args.model_buffer_size:
-        #         old_nets = copy.deepcopy(nets)
-        #         for _, net in old_nets.items():
-        #             net.eval()
-        #             for param in net.parameters():
-        #                 param.requires_grad = False
+        old_nets = copy.deepcopy(nets)
+        for _, net in old_nets.items():
+            net.eval()
+            for param in net.parameters():
+                param.requires_grad = False
 
         for round in range(n_comm_rounds):
             logger.info("in comm round:" + str(round))
@@ -1624,23 +1354,18 @@ if __name__ == '__main__':
             selected = arr[:int(args.n_parties * args.sample)]
 
             global_model.eval()
-
             for param in global_model.parameters():
                 param.requires_grad = False
             global_w = global_model.state_dict()
-
-            if args.server_momentum:
-                old_w = copy.deepcopy(global_model.state_dict())
 
             nets_this_round = {k: nets[k] for k in selected}
             for net in nets_this_round.values():
                 net.load_state_dict(global_w)
 
-            local_train_net_moon(nets_this_round, args, net_dataidx_map_train, net_dataidx_map_test, train_dl=train_dl, test_dl=test_dl, global_model = global_model, prev_model_pool=old_nets_pool, round=round, device=device)
+            local_train_net_moon(nets_this_round, args, net_dataidx_map_train, net_dataidx_map_test, global_model, old_nets, device=device)
 
-            total_data_points = sum([len(net_dataidx_map_train[r]) for r in party_list_this_round])
-            fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in party_list_this_round]
-
+            total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
+            fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
 
             for net_id, net in enumerate(nets_this_round.values()):
                 net_para = net.state_dict()
@@ -1650,52 +1375,35 @@ if __name__ == '__main__':
                 else:
                     for key in net_para:
                         global_w[key] += net_para[key] * fed_avg_freqs[net_id]
-
-            if args.server_momentum:
-                delta_w = copy.deepcopy(global_w)
-                for key in delta_w:
-                    delta_w[key] = old_w[key] - global_w[key]
-                    moment_v[key] = args.server_momentum * moment_v[key] + (1-args.server_momentum) * delta_w[key]
-                    global_w[key] = old_w[key] - moment_v[key]
-
             global_model.load_state_dict(global_w)
-            #summary(global_model.to(device), (3, 32, 32))
 
-            logger.info('global n_training: %d' % len(train_dl_global))
-            logger.info('global n_test: %d' % len(test_dl))
-            global_model.cuda()
-            train_acc, train_loss = compute_accuracy(global_model, train_dl_global, device=device)
-            test_acc, conf_matrix, _ = compute_accuracy(global_model, test_dl, get_confusion_matrix=True, device=device)
-            global_model.to('cpu')
-            logger.info('>> Global Model Train accuracy: %f' % train_acc)
-            logger.info('>> Global Model Test accuracy: %f' % test_acc)
-            logger.info('>> Global Model Train loss: %f' % train_loss)
+            if (round+1)>=test_round and (round+1)%eval_step == 0:
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client_simple(
+                global_model, args, net_dataidx_map_train, net_dataidx_map_test, nets, device=device)
 
+                if args.log_flag:
+                    logger.info('>> Global Model Train accuracy: %f' % train_acc)
+                    logger.info('>> Global Model Test accuracy: %f' % test_acc)
+                    logger.info('>> Test avg loss: %f' %test_avg_loss)
 
-            if len(old_nets_pool) < args.model_buffer_size:
-                old_nets = copy.deepcopy(nets)
-                for _, net in old_nets.items():
-                    net.eval()
-                    for param in net.parameters():
-                        param.requires_grad = False
-                old_nets_pool.append(old_nets)
-            elif args.pool_option == 'FIFO':
-                old_nets = copy.deepcopy(nets)
-                for _, net in old_nets.items():
-                    net.eval()
-                    for param in net.parameters():
-                        param.requires_grad = False
-                for i in range(args.model_buffer_size-2, -1, -1):
-                    old_nets_pool[i] = old_nets_pool[i+1]
-                old_nets_pool[args.model_buffer_size - 1] = old_nets
+                results_dict['train_avg_loss'].append(train_avg_loss)
+                results_dict['train_avg_acc'].append(train_acc)
+                results_dict['test_avg_loss'].append(test_avg_loss)
+                results_dict['test_avg_acc'].append(test_acc*100)
+   
+        save_path = Path("results_table/"+save_path)
+        save_path.mkdir(parents=True, exist_ok=True)
 
-            mkdirs(args.modeldir+'fedcon/')
-            if args.save_model:
-                torch.save(global_model.state_dict(), args.modeldir+'fedcon/global_model_'+args.log_file_name+'.pth')
-                torch.save(nets[0].state_dict(), args.modeldir+'fedcon/localmodel0'+args.log_file_name+'.pth')
-                for nets_id, old_nets in enumerate(old_nets_pool):
-                    torch.save({'pool'+ str(nets_id) + '_'+'net'+str(net_id): net.state_dict() for net_id, net in old_nets.items()}, args.modeldir+'fedcon/prev_model_pool_'+args.log_file_name+'.pth')
+        if args.save_model:
+            logger.info("Saving model")
+            outfile_gmodel = os.path.join(save_path, 'gmodel_1500.tar')
+            torch.save({'epoch':args.comm_round+1, 'state':global_model.state_dict()}, outfile_gmodel)
 
+        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
+
+        json_file_opt = "results_"+accessories+".json"
+        with open(str(save_path / json_file_opt), "w") as file:
+            json.dump(results_dict, file, indent=4)
 
     elif args.alg == 'fedAP':
         if args.dataset == 'shakespeare':

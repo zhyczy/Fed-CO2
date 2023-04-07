@@ -14,7 +14,7 @@ from utils.data_utils import prepare_data_domainNet, prepare_data_officeHome, pr
 from utils.methods import local_training
 from utils.utils import  communication, test, set_client_weight, visualize, log_write_dictionary, show_dictionary, visualize_combination, adapt_lambda
 from utils.func_v import definite_version
-from nets.models import AlexNet, AlexNet_rod, AlexNet_peer, P_Head, DigitModel, DigitModel_rod, D_Head
+from nets.models import AlexNet, AlexNet_rod, AlexNet_peer, AlexNet_moon, P_Head, DigitModel, DigitModel_rod, DigitModel_moon, D_Head
 from nets.vit import ViT, ViTHyper
 import argparse
 import time
@@ -40,7 +40,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch', type = int, default= 32, help ='batch size')
     parser.add_argument('--iters', type = int, default=300, help = 'iterations for communication')
     parser.add_argument('--wk_iters', type = int, default=1, help = 'optimization iters in local worker between communication')
-    parser.add_argument('--mode', type = str, default='fedbn', help='[FedBN | FedAvg | FedProx | fedper | fedrod | fedtp | peer | AlignFed | COPA]')
+    parser.add_argument('--mode', type = str, default='fedbn', help='[FedBN | FedAvg | FedProx | fedper | fedrod | fedtp | moon | peer | AlignFed | COPA]')
     parser.add_argument('--mu', type=float, default=1e-3, help='The hyper parameter for fedprox')
     parser.add_argument('--save_path', type = str, default='../checkpoint/domainnet', help='path to save the checkpoint')
     parser.add_argument('--resume', action='store_true', help ='resume training from the save path checkpoint')
@@ -114,6 +114,12 @@ if __name__ == '__main__':
     elif args.mode == 'COPA':
         server_model = AlexNet_peer().to(device)
         print(" COPA ")
+    elif args.mode == 'moon':
+        if args.dataset == 'digits':
+            server_model = DigitModel_moon().to(device)
+        else:
+            server_model = AlexNet_moon().to(device)
+        print(" moon ")
     else:
         if args.backbone == 'vit':
             server_model = ViT(image_size = 256, patch_size = 16, num_classes = 10, dim = 768, depth = 6, heads = 8, mlp_dim = 3072,
@@ -255,6 +261,10 @@ if __name__ == '__main__':
         hnet = ViTHyper(client_num, 128, hidden_dim = 256, dim=768, 
         heads = 8, dim_head = 64, n_hidden = 3, depth=6, client_sample=client_num).to(device)
 
+
+    elif args.mode == 'moon':
+        paggregation_models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
+
     best_changed = False
 
     if args.test:
@@ -328,6 +338,8 @@ if __name__ == '__main__':
 
             train_loss, train_acc, proto_dict, weight_dict = local_training(models, personalized_models, paggregation_models, hnet, server_model, global_prototypes, extra_modules, 
                                                                valid_onehot, weight_dict, args, train_loaders, test_loaders, optimizers, loss_fun, device, a_iter=a_iter)
+        if args.mode == 'moon':
+            paggregation_models = copy.deepcopy(models)
         
         with torch.no_grad():
             # Aggregation

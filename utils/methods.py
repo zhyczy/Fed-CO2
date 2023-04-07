@@ -171,6 +171,9 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             criterion_ba = nn.CrossEntropyLoss().to(device)
             train_loss, train_acc = train_rod(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, device)
 
+        elif args.mode == 'moon':
+            train_loss, train_acc = train_moon(model, paggregation_models[client_idx], train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
+
         elif args.mode == 'AlignFed':
             if args.version == 1:
                 train_loss, train_acc, proto = AlignFed_train(model, train_loaders[client_idx], optimizers[client_idx], global_prototypes, loss_fun, a_iter, device)
@@ -1132,6 +1135,54 @@ def train_COPA(model, Specific_heads, data_loader, optimizer, loss_fun, client_i
 
         loss.backward()
         optimizer.step()
+
+    return loss_all / len(data_loader), correct/total
+
+
+def train_moon(model, previous_model, data_loader, optimizer, loss_fun, device, temperature=0.5, mu=1):
+    cos=torch.nn.CosineSimilarity(dim=-1)
+    global_model = copy.deepcopy(model)
+    global_model.eval()
+    for param in global_model.parameters():
+        param.requires_grad = False
+    previous_model.eval()
+    for param in previous_model.parameters():
+        param.requires_grad = False
+    model.train()
+
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    for data, target in data_loader:
+        optimizer.zero_grad()
+
+        data = data.to(device)
+        target = target.to(device)
+
+        pro1 = model.produce_feature(data)
+        output = model.classifier(pro1)
+        pro2 = global_model.produce_feature(data)
+        posi = cos(pro1, pro2)
+        logits = posi.reshape(-1,1)
+
+        pro3 = previous_model.produce_feature(data)
+        nega = cos(pro1, pro3)
+        logits = torch.cat((logits, nega.reshape(-1,1)), dim=1)
+        logits /= temperature
+        labels = torch.zeros(data.size(0)).cuda().long()
+
+        loss2 = mu * loss_fun(logits, labels)
+        loss1 = loss_fun(output, target)
+        loss = loss1 + loss2
+
+        loss.backward()
+        optimizer.step()
+
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
 
     return loss_all / len(data_loader), correct/total
 

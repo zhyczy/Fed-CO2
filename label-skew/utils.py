@@ -12,7 +12,6 @@ from collections import OrderedDict, defaultdict
 from sklearn.metrics import confusion_matrix
 from torch.utils.data import DataLoader
 
-from model import *
 from datasets import MNIST_truncated, CIFAR10_truncated, CIFAR100_truncated, SVHN_custom, FashionMNIST_truncated, CustomTensorDataset, CelebA_custom, FEMNIST, Generated, genData, CharacterDataset, SubFEMNIST
 from math import sqrt
 
@@ -225,55 +224,6 @@ def euclidean_dist( x, y):
     return torch.sqrt(torch.pow(x - y, 2).sum(2))
 
 
-def load_mnist_data(datadir):
-
-    transform = transforms.Compose([transforms.ToTensor()])
-
-    mnist_train_ds = MNIST_truncated(datadir, train=True, download=True, transform=transform)
-    mnist_test_ds = MNIST_truncated(datadir, train=False, download=True, transform=transform)
-
-    X_train, y_train = mnist_train_ds.data, mnist_train_ds.target
-    X_test, y_test = mnist_test_ds.data, mnist_test_ds.target
-
-    X_train = X_train.data.numpy()
-    y_train = y_train.data.numpy()
-    X_test = X_test.data.numpy()
-    y_test = y_test.data.numpy()
-
-    return (X_train, y_train, X_test, y_test)
-
-
-def load_fmnist_data(datadir):
-
-    transform = transforms.Compose([transforms.ToTensor()])
-
-    mnist_train_ds = FashionMNIST_truncated(datadir, train=True, download=True, transform=transform)
-    mnist_test_ds = FashionMNIST_truncated(datadir, train=False, download=True, transform=transform)
-
-    X_train, y_train = mnist_train_ds.data, mnist_train_ds.target
-    X_test, y_test = mnist_test_ds.data, mnist_test_ds.target
-
-    X_train = X_train.data.numpy()
-    y_train = y_train.data.numpy()
-    X_test = X_test.data.numpy()
-    y_test = y_test.data.numpy()
-
-    return (X_train, y_train, X_test, y_test)
-
-
-def load_svhn_data(datadir):
-
-    transform = transforms.Compose([transforms.ToTensor()])
-
-    svhn_train_ds = SVHN_custom(datadir, train=True, download=True, transform=transform)
-    svhn_test_ds = SVHN_custom(datadir, train=False, download=True, transform=transform)
-
-    X_train, y_train = svhn_train_ds.data, svhn_train_ds.target
-    X_test, y_test = svhn_test_ds.data, svhn_test_ds.target
-
-    return (X_train, y_train, X_test, y_test)
-
-
 def load_cifar10_data(datadir):
 
     transform = transforms.Compose([transforms.ToTensor()])
@@ -297,39 +247,6 @@ def load_cifar100_data(datadir):
     X_test, y_test = cifar100_test_ds.data, cifar100_test_ds.target
 
     return (X_train, y_train, X_test, y_test)
-
-
-def load_celeba_data(datadir):
-
-    transform = transforms.Compose([transforms.ToTensor()])
-
-    celeba_train_ds = CelebA_custom(datadir, split='train', target_type="attr", download=True, transform=transform)
-    celeba_test_ds = CelebA_custom(datadir, split='test', target_type="attr", download=True, transform=transform)
-
-    gender_index = celeba_train_ds.attr_names.index('Male')
-    y_train =  celeba_train_ds.attr[:,gender_index:gender_index+1].reshape(-1)
-    y_test = celeba_test_ds.attr[:,gender_index:gender_index+1].reshape(-1)
-
-    return (None, y_train, None, y_test)
-
-
-def load_femnist_data(datadir):
-    transform = transforms.Compose([transforms.ToTensor()])
-
-    mnist_train_ds = FEMNIST(datadir, train=True, transform=transform, download=True)
-    mnist_test_ds = FEMNIST(datadir, train=False, transform=transform, download=True)
-
-    X_train, y_train, u_train = mnist_train_ds.data, mnist_train_ds.targets, mnist_train_ds.users_index
-    X_test, y_test, u_test = mnist_test_ds.data, mnist_test_ds.targets, mnist_test_ds.users_index
-
-    X_train = X_train.data.numpy()
-    y_train = y_train.data.numpy()
-    u_train = np.array(u_train)
-    X_test = X_test.data.numpy()
-    y_test = y_test.data.numpy()
-    u_test = np.array(u_test)
-
-    return (X_train, y_train, u_train, X_test, y_test, u_test)
 
 
 def record_net_data_stats(y_train, net_dataidx_map, logdir=None):
@@ -363,118 +280,12 @@ def partition_data(dataset, datadir, partition, n_parties, beta=0.4, logdir=None
     #np.random.seed(2020)
     #torch.manual_seed(2020)
 
-    if dataset == 'mnist':
-        X_train, y_train, X_test, y_test = load_mnist_data(datadir)
-    elif dataset == 'fmnist':
-        X_train, y_train, X_test, y_test = load_fmnist_data(datadir)
-    elif dataset == 'cifar10':
+    if dataset == 'cifar10':
         X_train, y_train, X_test, y_test = load_cifar10_data(datadir)
         y = np.concatenate([y_train, y_test], axis=0)
     elif dataset == 'cifar100':
         X_train, y_train, X_test, y_test = load_cifar100_data(datadir)
         y = np.concatenate([y_train, y_test], axis=0)
-
-    elif dataset == 'svhn':
-        X_train, y_train, X_test, y_test = load_svhn_data(datadir)
-    elif dataset == 'celeba':
-        X_train, y_train, X_test, y_test = load_celeba_data(datadir)
-    elif dataset == 'femnist':
-        X_train, y_train, u_train, X_test, y_test, u_test = load_femnist_data(datadir)
-    elif dataset == 'generated':
-        X_train, y_train = [], []
-        for loc in range(4):
-            for i in range(1000):
-                p1 = random.random()
-                p2 = random.random()
-                p3 = random.random()
-                if loc > 1:
-                    p2 = -p2
-                if loc % 2 ==1:
-                    p3 = -p3
-                if i % 2 == 0:
-                    X_train.append([p1, p2, p3])
-                    y_train.append(0)
-                else:
-                    X_train.append([-p1, -p2, -p3])
-                    y_train.append(1)
-        X_test, y_test = [], []
-        for i in range(1000):
-            p1 = random.random() * 2 - 1
-            p2 = random.random() * 2 - 1
-            p3 = random.random() * 2 - 1
-            X_test.append([p1, p2, p3])
-            if p1>0:
-                y_test.append(0)
-            else:
-                y_test.append(1)
-        X_train = np.array(X_train, dtype=np.float32)
-        X_test = np.array(X_test, dtype=np.float32)
-        y_train = np.array(y_train, dtype=np.int32)
-        y_test = np.array(y_test, dtype=np.int64)
-        idxs = np.linspace(0,3999,4000,dtype=np.int64)
-        batch_idxs = np.array_split(idxs, n_parties)
-        net_dataidx_map = {i: batch_idxs[i] for i in range(n_parties)}
-        mkdirs("data/generated/")
-        np.save("data/generated/X_train.npy",X_train)
-        np.save("data/generated/X_test.npy",X_test)
-        np.save("data/generated/y_train.npy",y_train)
-        np.save("data/generated/y_test.npy",y_test)
-    
-    #elif dataset == 'covtype':
-    #    cov_type = sk.fetch_covtype('./data')
-    #    num_train = int(581012 * 0.75)
-    #    idxs = np.random.permutation(581012)
-    #    X_train = np.array(cov_type['data'][idxs[:num_train]], dtype=np.float32)
-    #    y_train = np.array(cov_type['target'][idxs[:num_train]], dtype=np.int32) - 1
-    #    X_test = np.array(cov_type['data'][idxs[num_train:]], dtype=np.float32)
-    #    y_test = np.array(cov_type['target'][idxs[num_train:]], dtype=np.int32) - 1
-    #    mkdirs("data/generated/")
-    #    np.save("data/generated/X_train.npy",X_train)
-    #    np.save("data/generated/X_test.npy",X_test)
-    #    np.save("data/generated/y_train.npy",y_train)
-    #    np.save("data/generated/y_test.npy",y_test)
-
-    elif dataset in ('rcv1', 'SUSY', 'covtype'):
-        X_train, y_train = load_svmlight_file("../../../data/{}".format(dataset))
-        X_train = X_train.todense()
-        num_train = int(X_train.shape[0] * 0.75)
-        if dataset == 'covtype':
-            y_train = y_train-1
-        else:
-            y_train = (y_train+1)/2
-        idxs = np.random.permutation(X_train.shape[0])
-
-        X_test = np.array(X_train[idxs[num_train:]], dtype=np.float32)
-        y_test = np.array(y_train[idxs[num_train:]], dtype=np.int32)
-        X_train = np.array(X_train[idxs[:num_train]], dtype=np.float32)
-        y_train = np.array(y_train[idxs[:num_train]], dtype=np.int32)
-
-        mkdirs("data/generated/")
-        np.save("data/generated/X_train.npy",X_train)
-        np.save("data/generated/X_test.npy",X_test)
-        np.save("data/generated/y_train.npy",y_train)
-        np.save("data/generated/y_test.npy",y_test)
-
-    elif dataset in ('a9a'):
-        X_train, y_train = load_svmlight_file("../../../data/{}".format(dataset))
-        X_test, y_test = load_svmlight_file("../../../data/{}.t".format(dataset))
-        X_train = X_train.todense()
-        X_test = X_test.todense()
-        X_test = np.c_[X_test, np.zeros((len(y_test), X_train.shape[1] - np.size(X_test[0, :])))]
-
-        X_train = np.array(X_train, dtype=np.float32)
-        X_test = np.array(X_test, dtype=np.float32)
-        y_train = (y_train+1)/2
-        y_test = (y_test+1)/2
-        y_train = np.array(y_train, dtype=np.int32)
-        y_test = np.array(y_test, dtype=np.int32)
-
-        mkdirs("data/generated/")
-        np.save("data/generated/X_train.npy",X_train)
-        np.save("data/generated/X_test.npy",X_test)
-        np.save("data/generated/y_train.npy",y_train)
-        np.save("data/generated/y_test.npy",y_test)
-
 
     n_train = y_train.shape[0]
     n_test = y_test.shape[0]
@@ -780,68 +591,6 @@ def partition_data(dataset, datadir, partition, n_parties, beta=0.4, logdir=None
             net_dataidx_map_train[i] = np.append(net_dataidx_map_train[i], index[index < 50_000]).astype(int)
             net_dataidx_map_test[i] = np.append(net_dataidx_map_test[i], index[index >= 50_000]-50000).astype(int)
 
-    elif partition > "noniid-#label0" and partition <= "noniid-#label9":
-        num = eval(partition[13:])
-        if dataset in ('celeba', 'covtype', 'a9a', 'rcv1', 'SUSY'):
-            num = 1
-            K = 2
-        elif dataset == 'cifar10':
-            K = 10
-        elif dataset == "cifar100":
-            K = 100
-        else:
-            assert False
-            print("Choose Dataset in readme.")
-
-        if num == 10:
-            net_dataidx_map_train ={i:np.ndarray(0,dtype=np.int64) for i in range(n_parties)}
-            net_dataidx_map_train ={i:np.ndarray(0,dtype=np.int64) for i in range(n_parties)}
-            for i in range(10):
-                idx_k_train = np.where(y_train==i)[0]
-                idx_k_test = np.where(y_test==i)[0]
-
-                np.random.shuffle(idx_k_train)
-                np.random.shuffle(idx_k_test)
-
-                train_split = np.array_split(idx_k_train, n_parties)
-                test_split = np.array_split(idx_k_test, n_parties)
-                for j in range(n_parties):
-                    net_dataidx_map_train[j] = np.append(net_dataidx_map_train[j], train_split[j])
-                    net_dataidx_map_test[j] = np.append(net_dataidx_map_test[j], test_split[j])
-        else:
-            times=[0 for i in range(10)]
-            contain=[]
-            for i in range(n_parties):
-                current=[i%K]
-                times[i%K]+=1
-                j=1
-                while (j<num):
-                    ind=random.randint(0,K-1)
-                    if (ind not in current):
-                        j=j+1
-                        current.append(ind)
-                        times[ind]+=1
-                contain.append(current)
-            net_dataidx_map_train = {i:np.ndarray(0,dtype=np.int64) for i in range(n_parties)}
-            net_dataidx_map_test = {i:np.ndarray(0,dtype=np.int64) for i in range(n_parties)}
-
-            for i in range(K):
-                idx_k_train = np.where(y_train==i)[0]
-                idx_k_test = np.where(y_test==i)[0]
-
-                np.random.shuffle(idx_k_train)
-                np.random.shuffle(idx_k_test)
-
-                train_split = np.array_split(idx_k_train, times[i])
-                test_split = np.array_split(idx_k_test, times[i])
-
-                ids=0
-                for j in range(n_parties):
-                    if i in contain[j]:
-                        net_dataidx_map_train[j] = np.append(net_dataidx_map_train[j], train_split[ids])
-                        net_dataidx_map_test[j] = np.append(net_dataidx_map_test[j], test_split[ids])
-                        ids+=1
-
     elif partition == "noniid-labeluni":
         if dataset == "cifar10":
             num = 2
@@ -930,39 +679,6 @@ def partition_data(dataset, datadir, partition, n_parties, beta=0.4, logdir=None
     testdata_cls_counts = record_net_data_stats(y_test, net_dataidx_map_test, logdir)
     print(testdata_cls_counts)
     return (X_train, y_train, X_test, y_test, net_dataidx_map_train, net_dataidx_map_test, traindata_cls_counts, testdata_cls_counts)
-
-
-def get_trainable_parameters(net):
-    'return trainable parameter values as a vector (only the first parameter set)'
-    trainable=filter(lambda p: p.requires_grad, net.parameters())
-    # logger.info("net.parameter.data:", list(net.parameters()))
-    paramlist=list(trainable)
-    N=0
-    for params in paramlist:
-        N+=params.numel()
-        # logger.info("params.data:", params.data)
-    X=torch.empty(N,dtype=torch.float64)
-    X.fill_(0.0)
-    offset=0
-    for params in paramlist:
-        numel=params.numel()
-        with torch.no_grad():
-            X[offset:offset+numel].copy_(params.data.view_as(X[offset:offset+numel].data))
-        offset+=numel
-    # logger.info("get trainable x:", X)
-    return X
-
-
-def put_trainable_parameters(net,X):
-    'replace trainable parameter values by the given vector (only the first parameter set)'
-    trainable=filter(lambda p: p.requires_grad, net.parameters())
-    paramlist=list(trainable)
-    offset=0
-    for params in paramlist:
-        numel=params.numel()
-        with torch.no_grad():
-            params.data.copy_(X[offset:offset+numel].data.view_as(params.data))
-        offset+=numel
 
 
 def compute_accuracy(model, dataloader, get_confusion_matrix=False, device="cpu"):
@@ -2536,21 +2252,6 @@ def compute_accuracy_hphead_client(hyper, personal_qkv_list, global_model, args,
         return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
     else:
         return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
-
-
-def save_model(model, model_index, args):
-    logger.info("saving local model-{}".format(model_index))
-    with open(args.modeldir+"trained_local_model"+str(model_index), "wb") as f_:
-        torch.save(model.state_dict(), f_)
-    return
-
-
-def load_model(model, model_index, device="cpu"):
-    #
-    with open("trained_local_model"+str(model_index), "rb") as f_:
-        model.load_state_dict(torch.load(f_))
-    model.to(device)
-    return model
 
 
 class AddGaussianNoise(object):

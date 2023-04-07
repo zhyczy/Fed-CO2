@@ -427,7 +427,7 @@ def train_net_shakes(net_id, net, train_dataloader, test_dataloader, epochs, lr,
         return None, test_acc
 
 
-def train_net_pfedKL_full(net_id, net, p_net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, args, a_iter, device="cpu"):
+def train_net_pfedKL_full(net_id, net, p_net, train_dataloader, test_dataloader, epochs, kl_epochs, lr, args_optimizer, args, a_iter, device="cpu"):
     if args_optimizer == 'adam':
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg)
         p_optimizer = optim.Adam(filter(lambda p: p.requires_grad, p_net.parameters()), lr=lr, weight_decay=args.reg)
@@ -452,27 +452,28 @@ def train_net_pfedKL_full(net_id, net, p_net, train_dataloader, test_dataloader,
         back_g_model.eval()
         back_p_model = copy.deepcopy(p_net)
         back_p_model.eval()
-        for tmp in train_dataloader:
-            for batch_idx, (x, target) in enumerate(tmp):
-                x, target = x.to(device), target.to(device)
-                x.requires_grad = True
-                target.requires_grad = False
-                target = target.long()
-                
-                output_g = net(x)
-                output_p = p_net(x)
-                last_g = back_g_model(x)
-                last_p = back_p_model(x)
+        for epoch in range(kl_epochs):
+            for tmp in train_dataloader:
+                for batch_idx, (x, target) in enumerate(tmp):
+                    x, target = x.to(device), target.to(device)
+                    x.requires_grad = True
+                    target.requires_grad = False
+                    target = target.long()
+                    
+                    output_g = net(x)
+                    output_p = p_net(x)
+                    last_g = back_g_model(x)
+                    last_p = back_p_model(x)
 
-                optimizer.zero_grad()
-                loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
-                loss.backward()
-                optimizer.step()
+                    optimizer.zero_grad()
+                    loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
+                    loss.backward()
+                    optimizer.step()
 
-                p_optimizer.zero_grad()
-                loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
-                loss_p.backward()
-                p_optimizer.step()
+                    p_optimizer.zero_grad()
+                    loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
+                    loss_p.backward()
+                    p_optimizer.step()
 
     for epoch in range(epochs):
         for tmp in train_dataloader:
@@ -505,7 +506,7 @@ def train_net_pfedKL_full(net_id, net, p_net, train_dataloader, test_dataloader,
         return None, test_acc
 
 
-def train_net_pfedKL_p(net_id, net, p_net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, args, a_iter, device="cpu"):
+def train_net_pfedKL_p(net_id, net, p_net, train_dataloader, test_dataloader, epochs, kl_epochs, lr, args_optimizer, args, a_iter, device="cpu"):
     if args_optimizer == 'adam':
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg)
         p_optimizer = optim.Adam(filter(lambda p: p.requires_grad, p_net.parameters()), lr=lr, weight_decay=args.reg)
@@ -528,19 +529,20 @@ def train_net_pfedKL_p(net_id, net, p_net, train_dataloader, test_dataloader, ep
     if a_iter != 0:
         back_g_model = copy.deepcopy(net)
         back_g_model.eval()
-        for tmp in train_dataloader:
-            for batch_idx, (x, target) in enumerate(tmp):
-                x, target = x.to(device), target.to(device)
-                x.requires_grad = True
-                target.requires_grad = False
-                target = target.long()
-                output_p = p_net(x)
-                last_g = back_g_model(x)
+        for epoch in range(kl_epochs):
+            for tmp in train_dataloader:
+                for batch_idx, (x, target) in enumerate(tmp):
+                    x, target = x.to(device), target.to(device)
+                    x.requires_grad = True
+                    target.requires_grad = False
+                    target = target.long()
+                    output_p = p_net(x)
+                    last_g = back_g_model(x)
 
-                p_optimizer.zero_grad()
-                loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
-                loss_p.backward()
-                p_optimizer.step()
+                    p_optimizer.zero_grad()
+                    loss_p = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
+                    loss_p.backward()
+                    p_optimizer.step()
 
     for epoch in range(epochs):
         for tmp in train_dataloader:
@@ -573,7 +575,7 @@ def train_net_pfedKL_p(net_id, net, p_net, train_dataloader, test_dataloader, ep
         return None, test_acc
 
 
-def train_net_pfedKL_g(net_id, net, p_net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, args, a_iter, device="cpu"):
+def train_net_pfedKL_g(net_id, net, p_net, train_dataloader, test_dataloader, epochs, kl_epochs, lr, args_optimizer, args, a_iter, device="cpu"):
     if args_optimizer == 'adam':
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg)
         p_optimizer = optim.Adam(filter(lambda p: p.requires_grad, p_net.parameters()), lr=lr, weight_decay=args.reg)
@@ -596,6 +598,22 @@ def train_net_pfedKL_g(net_id, net, p_net, train_dataloader, test_dataloader, ep
     if a_iter != 0:
         back_p_model = copy.deepcopy(p_net)
         back_p_model.eval()
+        for epoch in range(kl_epochs):
+            for tmp in train_dataloader:
+                for batch_idx, (x, target) in enumerate(tmp):
+                    x, target = x.to(device), target.to(device)
+                    x.requires_grad = True
+                    target.requires_grad = False
+                    target = target.long()
+                    output_g = net(x)
+                    last_p = back_p_model(x)
+
+                    optimizer.zero_grad()
+                    loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
+                    loss.backward()
+                    optimizer.step()
+
+    for epoch in range(epochs):
         for tmp in train_dataloader:
             for batch_idx, (x, target) in enumerate(tmp):
                 x, target = x.to(device), target.to(device)
@@ -603,12 +621,47 @@ def train_net_pfedKL_g(net_id, net, p_net, train_dataloader, test_dataloader, ep
                 target.requires_grad = False
                 target = target.long()
                 output_g = net(x)
-                last_p = back_p_model(x)
+                output_p = p_net(x)
 
                 optimizer.zero_grad()
-                loss = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
+                loss = criterion(output_g, target)
                 loss.backward()
                 optimizer.step()
+
+                p_optimizer.zero_grad()
+                loss_p = criterion(output_p, target)
+                loss_p.backward()
+                p_optimizer.step()
+
+    correct, total, _ = compute_accuracy_pfedKL(net, p_net, test_dataloader, device=device)
+    test_acc = correct/float(total)
+
+    if args.train_acc_pre:
+        correct, total, _ = compute_accuracy_pfedKL(net, p_net, train_dataloader, device=device)
+        train_acc = correct/float(total)
+        return train_acc, test_acc
+    else:
+        return None, test_acc
+
+
+def train_net_2branch(net_id, net, p_net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, args, device="cpu"):
+    if args_optimizer == 'adam':
+        optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg)
+        p_optimizer = optim.Adam(filter(lambda p: p.requires_grad, p_net.parameters()), lr=lr, weight_decay=args.reg)
+    elif args_optimizer == 'amsgrad':
+        optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg, amsgrad=True)
+        p_optimizer = optim.Adam(filter(lambda p: p.requires_grad, p_net.parameters()), lr=lr, weight_decay=args.reg, amsgrad=True)
+    elif args_optimizer == 'sgd':
+        optimizer = optim.SGD([p for p in net.parameters() if p.requires_grad], lr=lr, momentum=args.rho, weight_decay=args.reg)
+        p_optimizer = optim.SGD([p for p in p_net.parameters() if p.requires_grad], lr=lr, momentum=args.rho, weight_decay=args.reg)
+    criterion = nn.CrossEntropyLoss().to(device)
+
+    net.train()
+    p_net.train()
+    if type(train_dataloader) == type([1]):
+        pass
+    else:
+        train_dataloader = [train_dataloader]
 
     for epoch in range(epochs):
         for tmp in train_dataloader:
@@ -739,8 +792,8 @@ def local_train_net_per(nets, selected, args, net_dataidx_map_train, net_dataidx
 
 
 def local_train_net_per_kl(nets, p_nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, a_iter, logger=None, device="cpu"):
-    avg_acc = 0.0
     n_epoch = args.epochs
+    kl_epoch = args.kl_epochs
     for net_id, net in nets.items():
         if net_id not in selected:
             continue
@@ -769,21 +822,54 @@ def local_train_net_per_kl(nets, p_nets, selected, args, net_dataidx_map_train, 
                 train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True)
 
         if args.version == 1:
-            trainacc, testacc = train_net_pfedKL_full(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, 
+            trainacc, testacc = train_net_pfedKL_full(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, kl_epoch,
             args.lr, args.optimizer, args, a_iter, device=device)
         elif args.version == 2:
-            trainacc, testacc = train_net_pfedKL_p(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, 
+            trainacc, testacc = train_net_pfedKL_p(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, kl_epoch,
             args.lr, args.optimizer, args, a_iter, device=device)
         elif args.version == 3:
-            trainacc, testacc = train_net_pfedKL_g(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, 
+            trainacc, testacc = train_net_pfedKL_g(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, kl_epoch,
             args.lr, args.optimizer, args, a_iter, device=device)
         
         logger.info("net %d final test acc %f" % (net_id, testacc))
-        avg_acc += testacc
 
-    avg_acc /= len(selected)
-    if args.alg == 'local_training':
-        logger.info("avg test acc %f" % avg_acc)
+    nets_list = list(nets.values())
+    return nets_list
+
+
+def local_train_net_per_2branch(nets, p_nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, a_iter, logger=None, device="cpu"):
+    n_epoch = args.epochs
+    for net_id, net in nets.items():
+        if net_id not in selected:
+            continue
+        # if args.log_flag:
+        #     logger.info("Training network %s. n_training: %d" % (str(net_id), len(dataidxs_train)))
+        # print("Training network %s. n_training: %d" % (str(net_id), len(dataidxs_train)))
+        # move the model to cuda device:
+        net.to(device)
+        p_net = p_nets[net_id]
+        p_net.to(device)
+
+        dataidxs_train = net_dataidx_map_train[net_id]
+        dataidxs_test = net_dataidx_map_test[net_id]
+        noise_level = args.noise
+        if net_id == args.n_parties - 1:
+            noise_level = 0
+
+        if args.model in ['mobilent', 'cnn-b']:
+            if args.noise_type == 'space':
+                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1, drop_last=True)
+            elif args.noise_type == 'increasing':
+                noise_level = args.noise / (args.n_parties - 1) * net_id
+                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True, apply_noise=True)
+            else:
+                noise_level = 0
+                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True)
+
+        trainacc, testacc = train_net_2branch(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, 
+        args.lr, args.optimizer, args, device=device)
+        
+        logger.info("net %d final test acc %f" % (net_id, testacc))
 
     nets_list = list(nets.values())
     return nets_list
@@ -1221,59 +1307,27 @@ def local_train_net_cluster(nets, selected, args, net_dataidx_map_train, net_dat
     return prototype_dict
 
 
-def local_train_net_moon(nets, args, net_dataidx_map_train, net_dataidx_map_test, train_dl=None, test_dl=None, global_model = None, prev_model_pool = None, server_c = None, clients_c = None, round=None, device="cpu"):
-    avg_acc = 0.0
-    acc_list = []
-    if global_model:
-        global_model.cuda()
-    if server_c:
-        server_c.cuda()
-        server_c_collector = list(server_c.cuda().parameters())
-        new_server_c_collector = copy.deepcopy(server_c_collector)
+def local_train_net_moon(nets, args, net_dataidx_map_train, net_dataidx_map_test, global_model, prev_model_pool, device="cpu"):
+    global_model.to(device)
     for net_id, net in nets.items():
+        net.to(device)
         dataidxs_train = net_dataidx_map_train[net_id]
         dataidxs_test = net_dataidx_map_test[net_id]
 
-        logger.info("Training network %s. n_training: %d" % (str(net_id), len(dataidxs)))
         noise_level = 0
         train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
         n_epoch = args.epochs
 
-        prev_models=[]
-        for i in range(len(prev_model_pool)):
-            prev_models.append(prev_model_pool[i][net_id])
-        trainacc, testacc = train_net_fedcon(net_id, net, global_model, prev_models, train_dl_local, test_dl, n_epoch, args.lr,
-                                              args.optimizer, args.mu, args.temperature, args, round, device=device)
+        prev_model = prev_model_pool[net_id].to(device)
+        trainacc, testacc = train_net_fedcon(net_id, net, global_model, prev_model, train_dl_local, test_dl_local, n_epoch, args.lr,
+                                              args.optimizer, args.mu, args.temperature, args, device=device)
 
         logger.info("net %d final test acc %f" % (net_id, testacc))
-        avg_acc += testacc
-        acc_list.append(testacc)
-    avg_acc /= args.n_parties
 
-    if global_model:
-        global_model.to('cpu')
-    if server_c:
-        for param_index, param in enumerate(server_c.parameters()):
-            server_c_collector[param_index] = new_server_c_collector[param_index]
-        server_c.to('cpu')
     return nets
 
 
-def train_net_fedcon(net_id, net, global_net, previous_nets, train_dataloader, test_dataloader, epochs, lr, args_optimizer, mu, temperature, args, round, device="cpu"):
-    net = nn.DataParallel(net)
-    net.cuda()
-    logger.info('Training network %s' % str(net_id))
-    logger.info('n_training: %d' % len(train_dataloader))
-    logger.info('n_test: %d' % len(test_dataloader))
-
-    train_acc, _ = compute_accuracy(net, train_dataloader, device=device)
-
-    test_acc, conf_matrix, _ = compute_accuracy(net, test_dataloader, get_confusion_matrix=True, device=device)
-
-    logger.info('>> Pre-Training Training accuracy: {}'.format(train_acc))
-    logger.info('>> Pre-Training Test accuracy: {}'.format(test_acc))
-
-
+def train_net_fedcon(net_id, net, global_net, previous_net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, mu, temperature, args, device="cpu"):
     if args_optimizer == 'adam':
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg)
     elif args_optimizer == 'amsgrad':
@@ -1283,42 +1337,39 @@ def train_net_fedcon(net_id, net, global_net, previous_nets, train_dataloader, t
         optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, momentum=0.9,
                               weight_decay=args.reg)
 
-    criterion = nn.CrossEntropyLoss().cuda()
-    # global_net.to(device)
-
-    for previous_net in previous_nets:
-        previous_net.cuda()
-    global_w = global_net.state_dict()
+    criterion = nn.CrossEntropyLoss().to(device)
+    previous_net.to(device)
+    previous_net.eval()
+    global_net.eval()
+    net.train()
 
     cnt = 0
     cos=torch.nn.CosineSimilarity(dim=-1)
-    # mu = 0.001
 
     for epoch in range(epochs):
         epoch_loss_collector = []
         epoch_loss1_collector = []
         epoch_loss2_collector = []
         for batch_idx, (x, target) in enumerate(train_dataloader):
-            x, target = x.cuda(), target.cuda()
+            x, target = x.to(device), target.to(device)
 
             optimizer.zero_grad()
             x.requires_grad = False
             target.requires_grad = False
             target = target.long()
 
-            _, pro1, out = net(x)
-            _, pro2, _ = global_net(x)
+            pro1 = net.produce_feature(x)
+            out = net.fc3(pro1)
+            pro2 = global_net.produce_feature(x)
+            # _, pro1, out = net(x)
+            # _, pro2, _ = global_net(x)
 
             posi = cos(pro1, pro2)
             logits = posi.reshape(-1,1)
 
-            for previous_net in previous_nets:
-                previous_net.cuda()
-                _, pro3, _ = previous_net(x)
-                nega = cos(pro1, pro3)
-                logits = torch.cat((logits, nega.reshape(-1,1)), dim=1)
-
-                previous_net.to('cpu')
+            pro3 = previous_net.produce_feature(x)
+            nega = cos(pro1, pro3)
+            logits = torch.cat((logits, nega.reshape(-1,1)), dim=1)
 
             logits /= temperature
             labels = torch.zeros(x.size(0)).cuda().long()
@@ -1339,17 +1390,12 @@ def train_net_fedcon(net_id, net, global_net, previous_nets, train_dataloader, t
         epoch_loss = sum(epoch_loss_collector) / len(epoch_loss_collector)
         epoch_loss1 = sum(epoch_loss1_collector) / len(epoch_loss1_collector)
         epoch_loss2 = sum(epoch_loss2_collector) / len(epoch_loss2_collector)
-        logger.info('Epoch: %d Loss: %f Loss1: %f Loss2: %f' % (epoch, epoch_loss, epoch_loss1, epoch_loss2))
+        # logger.info('Epoch: %d Loss: %f Loss1: %f Loss2: %f' % (epoch, epoch_loss, epoch_loss1, epoch_loss2))
 
-
-    for previous_net in previous_nets:
-        previous_net.to('cpu')
-    train_acc, _ = compute_accuracy(net, train_dataloader, device=device)
-    test_acc, conf_matrix, _ = compute_accuracy(net, test_dataloader, get_confusion_matrix=True, device=device)
-
-    logger.info('>> Training accuracy: %f' % train_acc)
-    logger.info('>> Test accuracy: %f' % test_acc)
-    net.to('cpu')
-    logger.info(' ** Training complete **')
-    return train_acc, test_acc
+    test_acc  = compute_accuracy(net, test_dataloader, device=device)
+    if args.train_acc_pre:
+        train_acc = compute_accuracy(net, train_dataloader, device=device)
+        return train_acc, test_acc
+    else:
+        return None, test_acc
 
