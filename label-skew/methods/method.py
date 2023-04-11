@@ -496,11 +496,11 @@ def train_net_pfedKL_full(net_id, net, p_net, train_dataloader, test_dataloader,
                 p_optimizer.step()
 
     correct, total, _ = compute_accuracy_pfedKL(net, p_net, test_dataloader, device=device)
-    test_acc = correct/float(total)
+    test_acc = correct[0]/float(total)
 
     if args.train_acc_pre:
         correct, total, _ = compute_accuracy_pfedKL(net, p_net, train_dataloader, device=device)
-        train_acc = correct/float(total)
+        train_acc = correct[0]/float(total)
         return train_acc, test_acc
     else:
         return None, test_acc
@@ -565,11 +565,11 @@ def train_net_pfedKL_p(net_id, net, p_net, train_dataloader, test_dataloader, ep
                 p_optimizer.step()
 
     correct, total, _ = compute_accuracy_pfedKL(net, p_net, test_dataloader, device=device)
-    test_acc = correct/float(total)
+    test_acc = correct[0]/float(total)
 
     if args.train_acc_pre:
         correct, total, _ = compute_accuracy_pfedKL(net, p_net, train_dataloader, device=device)
-        train_acc = correct/float(total)
+        train_acc = correct[0]/float(total)
         return train_acc, test_acc
     else:
         return None, test_acc
@@ -634,11 +634,11 @@ def train_net_pfedKL_g(net_id, net, p_net, train_dataloader, test_dataloader, ep
                 p_optimizer.step()
 
     correct, total, _ = compute_accuracy_pfedKL(net, p_net, test_dataloader, device=device)
-    test_acc = correct/float(total)
+    test_acc = correct[0]/float(total)
 
     if args.train_acc_pre:
         correct, total, _ = compute_accuracy_pfedKL(net, p_net, train_dataloader, device=device)
-        train_acc = correct/float(total)
+        train_acc = correct[0]/float(total)
         return train_acc, test_acc
     else:
         return None, test_acc
@@ -684,11 +684,11 @@ def train_net_2branch(net_id, net, p_net, train_dataloader, test_dataloader, epo
                 p_optimizer.step()
 
     correct, total, _ = compute_accuracy_pfedKL(net, p_net, test_dataloader, device=device)
-    test_acc = correct/float(total)
+    test_acc = correct[0]/float(total)
 
     if args.train_acc_pre:
         correct, total, _ = compute_accuracy_pfedKL(net, p_net, train_dataloader, device=device)
-        train_acc = correct/float(total)
+        train_acc = correct[0]/float(total)
         return train_acc, test_acc
     else:
         return None, test_acc
@@ -822,13 +822,13 @@ def local_train_net_per_kl(nets, p_nets, selected, args, net_dataidx_map_train, 
                 train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True)
 
         if args.version == 1:
-            trainacc, testacc = train_net_pfedKL_full(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, kl_epoch,
+            _, testacc = train_net_pfedKL_full(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, kl_epoch,
             args.lr, args.optimizer, args, a_iter, device=device)
         elif args.version == 2:
-            trainacc, testacc = train_net_pfedKL_p(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, kl_epoch,
+            _, testacc = train_net_pfedKL_p(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, kl_epoch,
             args.lr, args.optimizer, args, a_iter, device=device)
         elif args.version == 3:
-            trainacc, testacc = train_net_pfedKL_g(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, kl_epoch,
+            _, testacc = train_net_pfedKL_g(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, kl_epoch,
             args.lr, args.optimizer, args, a_iter, device=device)
         
         logger.info("net %d final test acc %f" % (net_id, testacc))
@@ -866,7 +866,7 @@ def local_train_net_per_2branch(nets, p_nets, selected, args, net_dataidx_map_tr
                 noise_level = 0
                 train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True)
 
-        trainacc, testacc = train_net_2branch(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, 
+        _, testacc = train_net_2branch(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, 
         args.lr, args.optimizer, args, device=device)
         
         logger.info("net %d final test acc %f" % (net_id, testacc))

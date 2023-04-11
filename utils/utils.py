@@ -42,7 +42,7 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                 models[client_idx].load_state_dict(copy.deepcopy(paggre_models[client_idx].state_dict()))
 
         elif args.mode.lower() == 'peer':
-            if args.version in [63, 76, 81, 56, 57, 71, 78, 79, 80, 82, 83, 88, 89, 90]:
+            if args.version in [63, 76, 81, 56, 57, 71, 78, 79, 80, 82, 83, 88, 89, 90, 91]:
                 for key in server_model.state_dict().keys():
                     if 'bn' not in key:
                         temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
@@ -259,8 +259,8 @@ def peer_test(model, p_model, data_loader, loss_fun, device):
 
         loss_g = loss_fun(output_g, target)
         loss_p = loss_fun(output_p, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
+        loss_ga += loss_g.item()
+        loss_pa += loss_p.item()
 
         pred_g = output_g.data.max(1)[1]
         correct_g += pred_g.eq(target.view(-1)).sum().item()
@@ -297,8 +297,8 @@ def peer_test_lambda(model, p_model, extra_model, data_loader, loss_fun, device)
 
         loss_g = loss_fun(output_g, target)
         loss_p = loss_fun(output_p, target)
-        loss_ga += loss_g
-        loss_pa += loss_p
+        loss_ga += loss_g.item()
+        loss_pa += loss_p.item()
 
         pred_g = output_g.data.max(1)[1]
         correct_g += pred_g.eq(target.view(-1)).sum().item()

@@ -338,13 +338,6 @@ def init_personalized_parameters(args, client_number=None):
     return personalized_pred_list
 
 
-def view_image(train_dataloader):
-    for (x, target) in train_dataloader:
-        np.save("img.npy", x)
-        print(x.shape)
-        exit(0)
-
-
 def get_partition_dict(dataset, partition, n_parties, init_seed=0, datadir='./data', logdir='./logs', beta=0.5):
     seed = init_seed
     np.random.seed(seed)
@@ -1202,18 +1195,24 @@ if __name__ == '__main__':
 
             if (a_iter+1)>=test_round and (a_iter+1)%eval_step == 0: 
                 
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_two_branch(
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_two_branch(
                 personalized_bn_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
 
                 if args.log_flag:
                     logger.info('>> Global Model Train accuracy: %f' % train_acc)
                     logger.info('>> Global Model Test accuracy: %f' % test_acc)
+                    logger.info('>> Global Model G Test accuracy: %f' % test_g_acc)
+                    logger.info('>> Global Model P Test accuracy: %f' % test_p_acc)
                     logger.info('>> Test avg loss: %f' %test_avg_loss)
 
                 results_dict['train_avg_loss'].append(train_avg_loss)
                 results_dict['train_avg_acc'].append(train_acc)
                 results_dict['test_avg_loss'].append(test_avg_loss)
                 results_dict['test_avg_acc'].append(test_acc*100)
+                results_dict['test_g_avg_loss'].append(test_g_avg_loss)
+                results_dict['test_g_avg_acc'].append(test_g_acc*100)
+                results_dict['test_p_avg_loss'].append(test_p_avg_loss)
+                results_dict['test_p_avg_acc'].append(test_p_acc*100)
 
         save_path = Path("results_table/"+save_path)
         save_path.mkdir(parents=True, exist_ok=True)
@@ -1301,18 +1300,24 @@ if __name__ == '__main__':
 
             if (a_iter+1)>=test_round and (a_iter+1)%eval_step == 0: 
                 
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_two_branch(
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_two_branch(
                 personalized_bn_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
 
                 if args.log_flag:
                     logger.info('>> Global Model Train accuracy: %f' % train_acc)
                     logger.info('>> Global Model Test accuracy: %f' % test_acc)
+                    logger.info('>> Global Model G Test accuracy: %f' % test_g_acc)
+                    logger.info('>> Global Model P Test accuracy: %f' % test_p_acc)
                     logger.info('>> Test avg loss: %f' %test_avg_loss)
 
                 results_dict['train_avg_loss'].append(train_avg_loss)
                 results_dict['train_avg_acc'].append(train_acc)
                 results_dict['test_avg_loss'].append(test_avg_loss)
                 results_dict['test_avg_acc'].append(test_acc*100)
+                results_dict['test_g_avg_loss'].append(test_g_avg_loss)
+                results_dict['test_g_avg_acc'].append(test_g_acc*100)
+                results_dict['test_p_avg_loss'].append(test_p_avg_loss)
+                results_dict['test_p_avg_acc'].append(test_p_acc*100)
 
         save_path = Path("results_table/"+save_path)
         save_path.mkdir(parents=True, exist_ok=True)
@@ -2011,6 +2016,27 @@ if __name__ == '__main__':
     acc_mean = np.mean(acc_all)
     acc_std  = np.std(acc_all)
     logger.info('Test Acc = %4.2f%% +- %4.2f%%' %(acc_mean, acc_std))
+
+    if args.alg in ['pfedKL', 'pfedKL-abl']:
+        acc_all  = np.asarray(results_dict['test_g_avg_acc'])
+        logger.info("Accuracy G Record: ")
+        logger.info(acc_all)
+        acc_mean = np.mean(acc_all)
+        acc_std  = np.std(acc_all)
+        logger.info('Test Acc = %4.2f%% +- %4.2f%%' %(acc_mean, acc_std))
+
+        acc_all  = np.asarray(results_dict['test_p_avg_acc'])
+        logger.info("Accuracy P Record: ")
+        logger.info(acc_all)
+        acc_mean = np.mean(acc_all)
+        acc_std  = np.std(acc_all)
+        logger.info('Test Acc = %4.2f%% +- %4.2f%%' %(acc_mean, acc_std))
     if args.show_all_accuracy:
         logger.info("Accuracy in each client: ")
-        logger.info(results_dict['test_all_acc'])
+        # logger.info(results_dict['test_all_acc'])
+        logger.info(test_all_acc)
+        if args.alg in ['pfedKL', 'pfedKL-abl']:
+            logger.info("G Accuracy in each client: ")
+            logger.info(test_g_all_acc)
+            logger.info("P Accuracy in each client: ")
+            logger.info(test_p_all_acc)

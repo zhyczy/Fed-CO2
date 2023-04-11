@@ -156,6 +156,10 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_gen_full_kl_p_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)            
 
+            elif args.version == 91:
+                train_loss, train_acc = train_gen_full_kl_initialization_full_merge(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
+                                                  p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
+
             else:
                 train_loss, train_acc = others_train(args.version, model, personalized_models[client_idx], Extra_modules, paggregation_models, train_loaders[client_idx], 
                                         test_loaders[client_idx], optimizers[client_idx], p_optimizer, loss_fun, criterion_ba, Specific_head, Specific_adaptor, 
@@ -189,6 +193,102 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             train_loss, train_acc = train(model, train_loaders[client_idx], optimizers[client_idx], loss_fun, device)
 
     return train_loss, train_acc, proto_dict, client_weight
+
+
+def train_gen_full_kl_initialization_full_merge(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):
+    kl_loss = nn.KLDivLoss(reduction='batchmean')
+    client_num = len(Specific_heads.keys())
+    assert client_num != 0
+    l_lambda = 1/(client_num-1)
+    model.train()
+    p_model.train()
+
+    loss_all = 0
+    total = 0
+    correct = 0
+
+    if a_iter == 0:
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            feature_g = model.produce_feature(data)
+            output_g = model.classifier(feature_g)
+            feature_p = p_model.produce_feature(data)
+            output_p = p_model.classifier(feature_p)
+
+            optimizer.zero_grad()
+            part1 = loss_g(output_g, target)
+
+            part2 = 0
+            part3 = 0
+            for idxx in range(client_num):
+                if idxx != client_idx:
+                    Spe_classifier = Specific_heads[idxx]
+                    Spe_classifier.eval()
+                    output_gen = Spe_classifier(feature_g)
+                    output_per = Spe_classifier(feature_p)
+                    part2 += loss_g(output_gen, target)
+                    part3 += loss_g(output_per, target)
+            loss = part1 + part2
+            loss.backward()
+            optimizer.step()
+
+            p_optimizer.zero_grad()
+            loss_p = loss_fun(output_p, target) + part3
+            loss_p.backward()
+            p_optimizer.step()
+
+            loss_all += loss_p.item()
+            total += target.size(0)
+            pred = (output_g.detach()+output_p).data.max(1)[1]
+            correct += pred.eq(target.view(-1)).sum().item()
+    else:
+        back_g_model = copy.deepcopy(model)
+        back_g_model.eval()
+        back_p_model = copy.deepcopy(p_model)
+        back_p_model.eval()
+        for data, target in data_loader:
+            data = data.to(device)
+            target = target.to(device)
+            feature_g = model.produce_feature(data)
+            output_g = model.classifier(feature_g)
+            feature_p = p_model.produce_feature(data)
+            output_p = p_model.classifier(feature_p)
+
+            last_g = back_g_model(data)
+            last_p = back_p_model(data)
+
+            optimizer.zero_grad()
+            p_optimizer.zero_grad()
+
+            part2 = 0
+            part3 = 0
+            for idxx in range(client_num):
+                if idxx != client_idx:
+                    Spe_classifier = Specific_heads[idxx]
+                    Spe_classifier.eval()
+                    output_gen = Spe_classifier(feature_g)
+                    output_per = Spe_classifier(feature_p)
+                    part2 += loss_g(output_gen, target)
+                    part3 += loss_g(output_per, target)
+
+            part0 = kl_loss(F.log_softmax(output_g, dim=1), F.softmax(last_p.detach(), dim=1))
+            part1 = loss_g(output_g, target)
+            loss = part0 + part1 + part2
+            loss.backward()
+            optimizer.step()
+
+            part0 = kl_loss(F.log_softmax(output_p, dim=1), F.softmax(last_g.detach(), dim=1))
+            part1 = loss_fun(output_p, target)
+            loss_p = part0 + part1 + part3
+            loss_p.backward()
+            p_optimizer.step()
+
+            loss_all += loss_p.item()
+            total += target.size(0)
+            pred = (output_g.detach()+output_p.detach()).data.max(1)[1]
+            correct += pred.eq(target.view(-1)).sum().item()
+    return loss_all / len(data_loader), correct/total
 
 
 def train_gen_full_kl_p_initialization(model, p_model, data_loader, optimizer, p_optimizer, loss_fun, loss_g, Specific_heads, client_idx, a_iter, device):

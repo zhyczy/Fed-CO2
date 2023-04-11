@@ -14,7 +14,7 @@ from utils.data_utils import prepare_data_domainNet, prepare_data_officeHome, pr
 from utils.methods import local_training
 from utils.utils import  communication, test, set_client_weight, visualize, log_write_dictionary, show_dictionary, visualize_combination, adapt_lambda
 from utils.func_v import definite_version
-from nets.models import AlexNet, AlexNet_rod, AlexNet_peer, AlexNet_moon, P_Head, DigitModel, DigitModel_rod, DigitModel_moon, D_Head
+from nets.models import AlexNet, AlexNet_rod, AlexNet_peer, AlexNet_moon, P_Head, DigitModel, DigitModel_rod, DigitModel_moon, DigitModel_head, D_Head
 from nets.vit import ViT, ViTHyper
 import argparse
 import time
@@ -104,7 +104,7 @@ if __name__ == '__main__':
         else:
             if args.version in [18, 25, 63, 70, 76, 81, 37, 56, 57,
                                 66, 67, 68, 69, 71, 73, 78,
-                                79, 80, 82, 83, 88, 89, 90]:
+                                79, 80, 82, 83, 88, 89, 90, 91]:
                 server_model = AlexNet().to(device)
             else:
                 server_model = AlexNet_peer().to(device)
@@ -112,7 +112,10 @@ if __name__ == '__main__':
         server_model = AlexNet_peer().to(device)
         print("AlignFed Version: ", args.version)
     elif args.mode == 'COPA':
-        server_model = AlexNet_peer().to(device)
+        if args.dataset == 'digits':
+            server_model = DigitModel_head().to(device)
+        else:
+            server_model = AlexNet_peer().to(device)
         print(" COPA ")
     elif args.mode == 'moon':
         if args.dataset == 'digits':
@@ -231,6 +234,9 @@ if __name__ == '__main__':
 
         elif args.version == 90:
             print("Version90: P&G new KD, P&G generalize, personal BNs, learn λ")
+
+        elif args.version == 91:
+            print("Version91: Version56 and now we merge two phases together")
 
         else:
             definite_version(args.version)

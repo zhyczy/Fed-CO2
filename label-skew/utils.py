@@ -797,6 +797,8 @@ def compute_accuracy_pfedKL(net, p_net, dataloader, device="cpu"):
         dataloader = [dataloader]
 
     correct, total, total_loss, batch_count = 0, 0, 0, 0
+    g_correct, total_g_loss = 0, 0
+    p_correct, total_p_loss = 0, 0
     with torch.no_grad():
         for tmp in dataloader:
             for batch_idx, (x, target) in enumerate(tmp):
@@ -806,17 +808,30 @@ def compute_accuracy_pfedKL(net, p_net, dataloader, device="cpu"):
                 out = output_g.detach() + output_p.detach()
 
                 loss = criterion(out, target)
+                g_loss = criterion(output_g, target)
+                p_loss = criterion(output_p, target)
+
                 _, pred_label = torch.max(out.data, 1)
+                _, g_pred_label = torch.max(output_g.data, 1)
+                _, p_pred_label = torch.max(output_p.data, 1)
+
                 total_loss += loss.item()
+                total_g_loss += g_loss.item()
+                total_p_loss += p_loss.item()
+
                 batch_count += 1
                 total += x.data.size()[0]
                 correct += (pred_label == target.data).sum().item()
+                g_correct += (g_pred_label == target.data).sum().item()
+                p_correct += (p_pred_label == target.data).sum().item()
 
     if was_training:
         net.train()
         p_net.train()
 
-    return correct, total, total_loss/batch_count
+    cor_vec = [correct, g_correct, p_correct]
+    los_vec = [total_loss/batch_count, total_g_loss/batch_count, total_p_loss/batch_count]
+    return cor_vec, total, los_vec
 
 
 def compute_accuracy_fedRod(model, p_head, dataloader, sample_per_class, args, device="cpu"):
@@ -1513,14 +1528,14 @@ def compute_accuracy_local_ft(nets, args, net_dataidx_map_train, net_dataidx_map
         return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
 
 
-def compute_accuracy_two_branch(personal_qkv_list, global_model, p_nets, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
+def compute_accuracy_two_branch(personal_bn_list, global_model, p_nets, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
 
     if args.train_acc_pre:
         train_results = defaultdict(lambda: defaultdict(list))
     test_results = defaultdict(lambda: defaultdict(list))
     for net_id in range(args.n_parties):
 
-        node_weights = personal_qkv_list[net_id]
+        node_weights = personal_bn_list[net_id]
         g_net = copy.deepcopy(global_model)
         g_net.load_state_dict(node_weights, strict=False)
         g_net.eval()
@@ -1542,22 +1557,36 @@ def compute_accuracy_two_branch(personal_qkv_list, global_model, p_nets, args, n
         test_correct, test_total, test_avg_loss = compute_accuracy_pfedKL(g_net, p_net, test_dl_local, device=device)
         if args.train_acc_pre:
             train_correct, train_total, train_avg_loss = compute_accuracy_pfedKL(g_net, p_net, train_dl_local, device=device)
-
-        if args.train_acc_pre:
             train_results[net_id]['loss'] = train_avg_loss 
             train_results[net_id]['correct'] = train_correct
+            train_results[net_id]['g_loss'] = train_avg_loss[1] 
+            train_results[net_id]['g_correct'] = train_correct[1]
+            train_results[net_id]['p_loss'] = train_avg_loss[2] 
+            train_results[net_id]['p_correct'] = train_correct[2]
             train_results[net_id]['total'] = train_total
 
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
+        test_results[net_id]['loss'] = test_avg_loss[0] 
+        test_results[net_id]['correct'] = test_correct[0]
+        test_results[net_id]['g_loss'] = test_avg_loss[1] 
+        test_results[net_id]['g_correct'] = test_correct[1]
+        test_results[net_id]['p_loss'] = test_avg_loss[2] 
+        test_results[net_id]['p_correct'] = test_correct[2]
         test_results[net_id]['total'] = test_total
 
     test_total_correct = sum([val['correct'] for val in test_results.values()])
+    test_g_total_correct = sum([val['g_correct'] for val in test_results.values()])
+    test_p_total_correct = sum([val['p_correct'] for val in test_results.values()])
     test_total_samples = sum([val['total'] for val in test_results.values()])
     test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_avg_acc = test_total_correct / test_total_samples
+    test_g_avg_loss = np.mean([val['g_loss'] for val in test_results.values()])
+    test_p_avg_loss = np.mean([val['p_loss'] for val in test_results.values()]) 
 
+    test_avg_acc = test_total_correct / test_total_samples
     test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
+    test_g_avg_acc = test_g_total_correct / test_total_samples
+    test_g_all_acc = [val['g_correct'] / val['total'] for val in test_results.values()]
+    test_p_avg_acc = test_p_total_correct / test_total_samples
+    test_p_all_acc = [val['p_correct'] / val['total'] for val in test_results.values()]
 
     if args.train_acc_pre:
         train_total_correct = sum([val['correct'] for val in train_results.values()])
@@ -1566,9 +1595,9 @@ def compute_accuracy_two_branch(personal_qkv_list, global_model, p_nets, args, n
         train_acc_pre = train_total_correct / train_total_samples
 
         train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
+        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
     else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
+        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
 
 
 def compute_accuracy_per_client_simple(global_model, args, net_dataidx_map_train, net_dataidx_map_test, nets=None, device="cpu"):
