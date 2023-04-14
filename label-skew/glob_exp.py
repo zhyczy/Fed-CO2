@@ -245,6 +245,14 @@ def init_personalized_parameters(args, client_number=None):
                 for ll in range(args.depth):
                     kqv_dict["transformer.layers."+str(ll)+".0.fn.to_qkv.weight"]=None
                 personalized_pred_list.append(kqv_dict)
+        elif args.model == 'transformer':
+            for nndx in range(client_number):
+                kqv_dict = OrderedDict()
+                for ll in range(args.depth):
+                    kqv_dict["encoder.layer_stack."+str(ll)+".slf_attn.w_qs.weight"]=None
+                    kqv_dict["encoder.layer_stack."+str(ll)+".slf_attn.w_ks.weight"]=None
+                    kqv_dict["encoder.layer_stack."+str(ll)+".slf_attn.w_vs.weight"]=None
+                personalized_pred_list.append(kqv_dict)
 
     elif args.alg == 'fedRod':
         if args.model == "cnn":
@@ -412,6 +420,7 @@ if __name__ == '__main__':
                                                                                         32)
     logger.info("len train_dl_global: %d"  %len(train_ds_global))
     data_size = len(test_ds_global)
+    logger.info("len test_dl_global: %d"  %data_size)
 
     results_dict = defaultdict(list)
     eval_step = args.eval_step
@@ -421,11 +430,6 @@ if __name__ == '__main__':
 
     if args.alg == 'fedavg':
         logger.info("Initializing nets")
-
-        if args.k_neighbor:
-            args.epochs = 1
-            args.batch_size = 128
-
         nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
         global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
         global_model = global_models[0]
@@ -453,7 +457,7 @@ if __name__ == '__main__':
                     nets[idx].load_state_dict(global_para)
 
             local_train_net_per(nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, logger, device=device)
-            # update global model
+
             total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
             fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
 
@@ -469,9 +473,9 @@ if __name__ == '__main__':
 
             if (round+1)>=test_round and (round+1)%eval_step == 0:
                 # train_results, train_avg_loss, train_acc, train_all_acc = compute_accuracy_per_client_simple(global_model, args, net_dataidx_map_train, test=False, device=device)
-                # test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client_simple(global_model, args, net_dataidx_map_train, device=device)  
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client_simple(
-                global_model, args, net_dataidx_map_train, net_dataidx_map_test, nets, device=device)
+                # test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client_simple(global_model, args, net_dataidx_map_train, device=device)
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_global_per_client_simple(
+                global_model, args, net_dataidx_map_train, net_dataidx_map_test, test_dl_global, device=device)
 
                 if args.log_flag:
                     logger.info('>> Global Model Train accuracy: %f' % train_acc)
@@ -485,8 +489,8 @@ if __name__ == '__main__':
 
         save_path = Path("results_table/"+save_path)
         save_path.mkdir(parents=True, exist_ok=True)
-
-        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment  
+  
+        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment 
         # print("test_all_acc: ", test_all_acc)
         if args.save_model:
             logger.info("Saving model")
@@ -629,6 +633,7 @@ if __name__ == '__main__':
             selected = arr[:int(args.n_parties * args.sample)]
 
             update_dict = local_train_net_pfedMe(nets, selected, global_model, args, net_dataidx_map_train, net_dataidx_map_test, logger, device=device)
+
             # update global model
             total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
             fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
@@ -650,7 +655,7 @@ if __name__ == '__main__':
             #     param.data = (1 - args.pfedMe_beta)*pre_param.data + args.pfedMe_beta*param.data
 
             if (round+1)>=test_round and (round+1)%eval_step == 0:
-                itrain_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_local(
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_local(
                 nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
 
                 if args.log_flag:
@@ -681,7 +686,7 @@ if __name__ == '__main__':
             json.dump(results_dict, file, indent=4)  
 
     elif args.alg == 'fedPer':
-        if args.model not in ['cnn', 'vit', 'transformer', 'lstm']:
+        if args.model not in ['cnn', 'vit']:
             raise NotImplementedError("fedPer uses cnn as backbone")
         logger.info("Initializing nets")
 
@@ -752,7 +757,7 @@ if __name__ == '__main__':
 
             global_model.load_state_dict(global_para)
 
-            if (round+1)>=test_round and (round+1)%eval_step == 0:
+            if (round+1)>=test_round and (round+1)%eval_step == 0:   
                 train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_personally(
                 personalized_pred_list, global_model, args, net_dataidx_map_train, net_dataidx_map_test, nets, round, device=device)
 
@@ -784,7 +789,7 @@ if __name__ == '__main__':
             json.dump(results_dict, file, indent=4)
 
     elif args.alg == 'fedRod':
-        if args.model not in ['cnn', 'vit', 'transformer', 'lstm']:
+        if args.model not in ['cnn', 'vit']:
             raise NotImplementedError("fedRod uses cnn as backbone")
         logger.info("Initializing nets")
 
@@ -1085,8 +1090,8 @@ if __name__ == '__main__':
 
             if (a_iter+1)>=test_round and (a_iter+1)%eval_step == 0: 
                 
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_two_branch(
-                personalized_bn_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_global_two_branch(
+                personalized_bn_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, test_dl_global, device=device)
 
                 if args.log_flag:
                     logger.info('>> Global Model Train accuracy: %f' % train_acc)
@@ -1159,7 +1164,6 @@ if __name__ == '__main__':
                     nets[idx].load_state_dict(node_weights, strict=False)
 
             local_train_net_per_2branch(nets, local_nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, a_iter, logger, device=device)
-
             # update global model
             total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
             fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
@@ -1188,10 +1192,9 @@ if __name__ == '__main__':
 
             global_model.load_state_dict(global_para)
 
-            if (a_iter+1)>=test_round and (a_iter+1)%eval_step == 0: 
-                
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_two_branch(
-                personalized_bn_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
+            if (a_iter+1)>=test_round and (a_iter+1)%eval_step == 0:
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_global_two_branch(
+                personalized_bn_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, test_dl_global, device=device)
 
                 if args.log_flag:
                     logger.info('>> Global Model Train accuracy: %f' % train_acc)
@@ -1273,8 +1276,8 @@ if __name__ == '__main__':
             global_model.load_state_dict(global_w)
 
             if (round+1)>=test_round and (round+1)%eval_step == 0:
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client_simple(
-                global_model, args, net_dataidx_map_train, net_dataidx_map_test, nets, device=device)
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_global_per_client_simple(
+                global_model, args, net_dataidx_map_train, net_dataidx_map_test, test_dl_global, device=device)
 
                 if args.log_flag:
                     logger.info('>> Global Model Train accuracy: %f' % train_acc)
@@ -1406,8 +1409,8 @@ if __name__ == '__main__':
             local_train_net_per(nets, arr, args, net_dataidx_map_train, net_dataidx_map_test, logger, device=device)
             
             if (round+1)>=test_round and (round+1)%eval_step == 0:
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_local(
-                nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
+                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_global(
+                nets, args, net_dataidx_map_train, net_dataidx_map_test, test_dl_global, device=device)
 
                 if args.log_flag:
                     logger.info('>> Average Train accuracy: %f' % train_acc)
@@ -1841,6 +1844,7 @@ if __name__ == '__main__':
                         for key in net_para:
                             local_para[key] += net_para[key] * similarity_vec[jdx]
                 server_nets[idx].load_state_dict(local_para)
+
 
                 final_state = nets[idx].state_dict()
                 net_para = nets[idx].state_dict()

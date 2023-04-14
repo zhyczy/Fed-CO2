@@ -12,7 +12,7 @@ from collections import OrderedDict, defaultdict
 from sklearn.metrics import confusion_matrix
 from torch.utils.data import DataLoader
 
-from datasets import MNIST_truncated, CIFAR10_truncated, CIFAR100_truncated, SVHN_custom, FashionMNIST_truncated, CustomTensorDataset, CelebA_custom, FEMNIST, Generated, genData, CharacterDataset, SubFEMNIST
+from datasets import CIFAR10_truncated, CIFAR100_truncated
 from math import sqrt
 
 import torch.nn as nn
@@ -726,61 +726,7 @@ def compute_accuracy(model, dataloader, get_confusion_matrix=False, device="cpu"
     return correct/float(total)
 
 
-def compute_accuracy_shakes(model, dataloader, device="cpu"):
-
-    was_training = False
-    if model.training:
-        model.eval()
-        was_training = True
-
-    true_labels_list, pred_labels_list = np.array([]), np.array([])
-
-    if type(dataloader) == type([1]):
-        pass
-    else:
-        dataloader = [dataloader]
-
-    correct, total = 0, 0
-    global_loss = 0.
-    global_metric = 0.
-    n_samples = 0
-
-    all_characters = string.printable
-    labels_weight = torch.ones(len(all_characters), device=device)
-    for character in CHARACTERS_WEIGHTS:
-        labels_weight[all_characters.index(character)] = CHARACTERS_WEIGHTS[character]
-    labels_weight = labels_weight * 8
-    criterion = nn.CrossEntropyLoss(reduction="none", weight=labels_weight).to(device)
-
-    with torch.no_grad():
-        for tmp in dataloader:
-            for x, y, indices in tmp:
-
-                # print("x: ", x)
-                # print('y: ', y)
-                # print("indices: ", indices)
-                
-                x = x.to(device)
-                y = y.to(device)
-                n_samples += y.size(0)
-
-                chunk_len = y.size(1)
-
-                y_pred, _ = model(x)
-                global_loss += criterion(y_pred, y).sum().item() / chunk_len
-                _, predicted = torch.max(y_pred, 1)
-                correct = (predicted == y).float()
-                acc = correct.sum()
-                global_metric += acc.item() / chunk_len
-
-    if was_training:
-        model.train()
-
-    return global_metric, n_samples, global_loss/n_samples
-
-
 def compute_accuracy_pfedKL(net, p_net, dataloader, device="cpu"):
-
     was_training = False
     if net.training:
         net.eval()
@@ -1040,311 +986,6 @@ def compute_accuracy_loss_hypervit(model, dataloader, num_class, device="cpu"):
     return correct, total, total_loss / batch_count
 
 
-def compute_accuracy_loss_cal(model, train_dataloader, test_dataloader, args, calibrated_model, round=0, device="cpu"):
-       
-    true_labels_list, pred_labels_list = np.array([]), np.array([])
-    # ori_criterion = nn.CrossEntropyLoss().to(device)
-    calibrated_model.to(device)
-    criterion = nn.NLLLoss().to(device)
-    # logsoft_max_function = nn.LogSoftmax(dim=1)
-    soft_max_function = nn.Softmax(dim=1)
-    model.to(device)
-
-    if type(test_dataloader) == type([1]):
-        pass
-    else:
-        test_dataloader = [test_dataloader]
-        train_dataloader = [train_dataloader]
-
-    correct, total, total_loss, batch_count = 0, 0, 0, 0
-
-    if args.dataset == "cifar10":
-        class_id = {idd:[torch.zeros(1,128).to(device), 1, []] for idd in range(10)}
-    elif args.dataset == "cifar100":
-        class_id = {idd:[torch.zeros(1,128).to(device), 1, []] for idd in range(100)}
-
-    class_id_list = {}
-    
-    with torch.no_grad():
-        for tmp in train_dataloader:
-            for batch_idx, (x, target) in enumerate(tmp):
-                x, target = x.to(device), target.to(device,dtype=torch.int64)
-                feature = calibrated_model.produce_feature(x).detach()
-
-                for ins in range(len(target)):
-                    c_id = int(target[ins])
-                    class_id[c_id][0] += feature[ins].view(1,-1)
-                    class_id[c_id][1] += 1
-                    class_id[c_id][2].append(feature[ins])
-                    if c_id not in class_id_list.keys():
-                        class_id_list[c_id] = 1
-                    else:
-                        class_id_list[c_id] += 1
-                         
-        z_proto = 0
-        ff = 0
-        # sigma = []
-        sigma_matrix = 0
-        # dim_v = class_id[0][0].shape[1]
-        for cc in range(len(class_id.keys())):
-            class_id[cc][0] = class_id[cc][0]/class_id[cc][1]
-            feature_set = class_id[cc][2]
-            if len(feature_set)==0:
-                ss = torch.eye(128).to(device)
-                # sigma.append(ss)
-                # print(sigma)
-            elif len(feature_set)==1:
-                # part1 = feature_set[0].view(1,-1) - class_id[cc][0]
-                # part2 = part1.view(-1,1)
-                # ss = (torch.mm(part2, part1)).inverse()
-
-                pou = torch.eye(128).to(device)
-                second = (torch.pow((feature_set[0].view(1,-1) - class_id[cc][0]), 2)).expand(128, 128) * pou
-                ss = second.inverse()
-                # sigma.append(ss)
-            else:
-                ss = 0
-
-                for e_id in range(len(feature_set)):
-                    ele = feature_set[e_id]
-                    # if e_id == 0:
-                    #     feat = ele.view(1,-1)
-                    # else:
-                    #     feat = torch.cat((feat,ele.view(1,-1)),0)
-
-                    # part1 = ele.view(1,-1) - class_id[cc][0]
-                    # part2 = part1.view(-1,1)
-                    # pou = torch.mm(part2, part1)
-
-                    pou = torch.eye(128).to(device)
-                    second = (torch.pow((ele.view(1,-1) - class_id[cc][0]), 2)).expand(128,128) * pou
-                    ss += second
-
-                    # for jj in range(dim_v):
-                    #     pou[jj][jj] = ((ele[jj] - class_id[cc][0][0][jj])**2).data
-                    # ss += pou
-                    # print("ss1: ", ss)
-                    # print("ss2: ", ss2)
-   
-                # feat = feat.cpu().numpy().T
-                # s2 = np.cov(feat)
-
-                ss = (ss/(len(feature_set)-1)).inverse()
-                # sigma.append(ss)
-
-            if ff == 0:
-                z_proto = class_id[cc][0]
-                sigma_matrix = ss.view(1,128,128)
-                ff = 1
-            else:
-                sigma_matrix = torch.cat((sigma_matrix, ss.view(1,128,128)), 0)
-                z_proto = torch.cat((z_proto, class_id[cc][0]), 0)
-
-
-        appear_cls_id = list(class_id_list.keys())
-        # print("class id list: ", appear_cls_id)
-        # print("class id dict: ", class_id_list)
-        # print("Prototype Shape: ",z_proto.shape)
-        # print("Prototype: ",z_proto)
-
-        for tmp in test_dataloader:
-            for batch_idx, (x, target) in enumerate(tmp):
-                x, target = x.to(device), target.to(device,dtype=torch.int64)
-                feature = model.produce_feature(x).detach()
-                logits1 = model.mlp_head(feature)
-                probs1 = soft_max_function(logits1)
-                # print("probs1: ", probs1)
-
-                # dists = euclidean_dist(feature, z_proto)
-                dists = distance_calculate(feature, z_proto, 'Mahalanobis', device, sigma_matrix = sigma_matrix)
-                mask_matrix = torch.zeros_like(dists)
-                mask_matrix[:,appear_cls_id] = 1
-                # print("Dists0: ", dists)
-
-                # logits2 = -dists*mask_matrix
-                logits2 = -dists/100
-                normed_logits2 = soft_max_function(logits2) * mask_matrix
-                probs2 = normed_logits2/(torch.sum(normed_logits2, dim=1).view(-1,1))
-                # if round==1:
-                #     print("logits2: ", logits2[0])
-                #     print("test: ", soft_max_function(logits2))
-                #     print("normed_logits2: ", normed_logits2[0])
-                #     print("appear_cls_id: ", appear_cls_id)
-                #     print("mask_matrix: ", mask_matrix[0])
-                #     print("probs2: ", probs2[0])
-
-
-                if args.no_mlp_head:
-                    probs = probs2
-                else:
-                    lam = args.lambda_value
-                    probs = (1-lam)*probs1 + lam*probs2
-                    # probs = probs/(torch.sum(probs, dim=1).view(-1,1))
-
-                logits = torch.log(probs)
-                loss = criterion(logits, target)
-
-                # if round==1:
-                #     print("probs: ",probs[0])
-                #     print("logits: ", logits[0])
-                #     print('loss item: ',loss.item())
-                #     print("    ")
-
-                _, pred_label = torch.max(probs.data, 1)
-                # print()
-                # print("batch_idx: ", batch_idx)
-                # print("loss item: ", loss.item())
-                # print("logits: ", logits[0])
-                # print("predict: ", pred_label)
-                # print("GD: ", target.data)
-
-                total_loss += loss.item()
-                batch_count += 1
-                total += x.data.size()[0]
-                
-                correct += (pred_label == target.data).sum().item()
-
-                if device == "cpu":
-                    pred_labels_list = np.append(pred_labels_list, pred_label.numpy())
-                    true_labels_list = np.append(true_labels_list, target.data.numpy())
-                else:
-                    pred_labels_list = np.append(pred_labels_list, pred_label.cpu().numpy())
-                    true_labels_list = np.append(true_labels_list, target.data.cpu().numpy())
-
-    # print( )
-    # print("Total loss: ", total_loss)
-    # print("batch_count: ", batch_count)
-
-    return correct, total, total_loss/batch_count
-
-
-def compute_accuracy_loss_knn(model, train_dataloader, test_dataloader, datastore, embedding_dim, args, device="cpu"):
-
-    criterion = nn.CrossEntropyLoss().to(device)
-    model.to(device)
-
-    datastore.clear()
-
-    n_samples = len(train_dataloader.dataset)
-    total = len(test_dataloader.dataset)
-
-    if type(test_dataloader) == type([1]):
-        pass
-    else:
-        train_dataloader = [train_dataloader]
-        test_dataloader = [test_dataloader]
-
-    if args.dataset == 'cifar10':
-        n_classes = 10
-    elif args.dataset == 'cifar100':
-        n_classes = 100
-
-    with torch.no_grad():
-        train_features = 0
-        train_labels = 0
-
-        ff = 0
-        for tmp in train_dataloader:
-            for batch_idx, (x, target) in enumerate(tmp):
-                x, target = x.to(device), target.to(device,dtype=torch.int64)
-
-                if args.alg=="knn-per":
-                    activation = {}
-                    def hook_fn(model, input_, output):
-                        activation["features"] = output.squeeze().cpu().numpy()
-                    model.features.register_forward_hook(hook_fn)
-                    out = model(x)
-                    t_feature = activation["features"]
-
-                # elif args.alg in ["protoVit",'hyperVit']:
-                else:
-
-                    # t_feature = model.cal_feature(x).detach()
-                    # if model.pool == 'mean':
-                    #     tf_feature = t_feature.mean(dim = 1)
-                    # else:
-                    #     tf_feature = t_feature[:, 0]
-                    # tf_feature = model.to_latent(tf_feature)
-                    # t_feature = t_feature.view(-1, 65*128) 
-                    # out = model.mlp_head(tf_feature)
-
-                    t_feature = model.produce_feature(x).detach()
-                    out = model.mlp_head(t_feature)
-                    t_feature = t_feature.cpu().numpy()
-
-                if ff == 0:
-                    ff = 1
-                    train_labels = target.data.cpu().numpy()
-                    train_features = t_feature
-                else:
-                    train_labels = np.hstack((train_labels, target.data.cpu().numpy()))
-                    train_features = np.vstack((train_features, t_feature))
-
-            # print("train_labels: ", train_labels.shape)
-            # print("train_features: ", train_features.shape)
-            # assert False
-
-        test_features = 0
-        test_labels = 0
-        test_outputs = 0
-        ff = 0
-        for tmp in test_dataloader:
-            for batch_idx, (x, target) in enumerate(tmp):
-                x, target = x.to(device), target.to(device,dtype=torch.int64)
-
-                if args.alg=="knn-per":
-                    activation = {}
-                    def hook_fn(model, input_, output):
-                        activation["features"] = output.squeeze().cpu().numpy()
-                    model.features.register_forward_hook(hook_fn)
-                    out = model(x)
-                    t_feature = activation["features"]
-                    
-                # elif args.alg in ["protoVit",'hyperVit']:
-                else:
-
-                    # t_feature = model.cal_feature(x).detach()
-                    # if model.pool == 'mean':
-                    #     tf_feature = t_feature.mean(dim = 1)
-                    # else:
-                    #     tf_feature = t_feature[:, 0]
-                    # tf_feature = model.to_latent(tf_feature)
-                    # t_feature = t_feature.view(-1, 65*128) 
-                    # out = model.mlp_head(tf_feature)
-
-                    t_feature = model.produce_feature(x).detach()
-                    out = model.mlp_head(t_feature)
-                    t_feature = t_feature.cpu().numpy()
-
-                if ff == 0:
-                    ff = 1
-                    test_labels = target.data.cpu().numpy()
-                    test_features = t_feature
-                    test_outputs = F.softmax(out, dim=1).cpu().numpy()
-                else:
-                    test_labels = np.hstack((test_labels, target.data.cpu().numpy()))
-                    test_features = np.vstack((test_features, t_feature))
-                    test_outputs = np.vstack((test_outputs, F.softmax(out, dim=1).cpu().numpy()))
-
-        datastore.build(train_features, train_labels)
-        distances, indices = datastore.index.search(test_features, args.k_value)
-        similarities = np.exp(-distances / (embedding_dim * 1.))
-        neighbors_labels = datastore.labels[indices]
-        masks = np.zeros(((n_classes,) + similarities.shape))
-        for class_id in range(n_classes):
-            masks[class_id] = neighbors_labels == class_id
-
-        knn_outputs = (similarities * masks).sum(axis=2) / similarities.sum(axis=1)
-        knn_outputs = knn_outputs.T
-        outputs = args.knn_weight * knn_outputs + (1 - args.knn_weight) * test_outputs
-
-        predictions = np.argmax(outputs, axis=1)
-        correct = (test_labels == predictions).sum()
-
-    total_loss = criterion(torch.tensor(outputs), torch.tensor(test_labels))
-    return correct, total, total_loss
-
-
 def compute_accuracy_local(nets, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
     if args.train_acc_pre:
         train_results = defaultdict(lambda: defaultdict(list))
@@ -1354,25 +995,17 @@ def compute_accuracy_local(nets, args, net_dataidx_map_train, net_dataidx_map_te
         local_model = copy.deepcopy(nets[net_id])
         local_model.eval()
 
-        if args.dataset == 'shakespeare':
-            train_dl_local = net_dataidx_map_train[net_id]
-            test_dl_local = net_dataidx_map_test[net_id]
-
-            test_correct, test_total, test_avg_loss = compute_accuracy_shakes(local_model, test_dl_local, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_shakes(local_model, train_dl_local, device=device)
+        dataidxs_train = net_dataidx_map_train[net_id]
+        dataidxs_test = net_dataidx_map_test[net_id]
+        if args.noise_type == 'space':
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
         else:
-            dataidxs_train = net_dataidx_map_train[net_id]
-            dataidxs_test = net_dataidx_map_test[net_id]
-            if args.noise_type == 'space':
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-            else:
-                noise_level = args.noise / (args.n_parties - 1) * net_id
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+            noise_level = args.noise / (args.n_parties - 1) * net_id
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
 
-            test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
+        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
+        if args.train_acc_pre:
+            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
         
         if args.train_acc_pre:
             train_results[net_id]['loss'] = train_avg_loss 
@@ -1609,29 +1242,20 @@ def compute_accuracy_per_client_simple(global_model, args, net_dataidx_map_train
         local_model = copy.deepcopy(global_model)
         local_model.eval()
 
-        if args.dataset == 'shakespeare':
-            train_dl_local = net_dataidx_map_train[net_id]
-            test_dl_local = net_dataidx_map_test[net_id]
-            test_correct, test_total, test_avg_loss = compute_accuracy_shakes(local_model, test_dl_local, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_shakes(local_model, train_dl_local, device=device)
-
+        dataidxs_train = net_dataidx_map_train[net_id]
+        dataidxs_test = net_dataidx_map_test[net_id]
+        if args.noise_type == 'space':
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
+        elif args.noise_type == 'increasing':
+            noise_level = args.noise / (args.n_parties - 1) * net_id
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
         else:
-            dataidxs_train = net_dataidx_map_train[net_id]
-            dataidxs_test = net_dataidx_map_test[net_id]
-            if args.noise_type == 'space':
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-            elif args.noise_type == 'increasing':
-                noise_level = args.noise / (args.n_parties - 1) * net_id
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
-            else:
-                noise_level = 0
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-     
-            test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-
+            noise_level = 0
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+ 
+        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
+        if args.train_acc_pre:
+            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
 
         if args.train_acc_pre:
             train_results[net_id]['loss'] = train_avg_loss 
@@ -1757,58 +1381,21 @@ def compute_accuracy_per_client(hyper, nets, global_model, args, net_dataidx_map
         local_model = copy.deepcopy(global_model)
         local_model.load_state_dict(node_weights, strict=False)
         local_model.eval()
-
-        if args.calibrated:
-            calibrated_model = copy.deepcopy(nets[net_id])
-            calibrated_model.eval()
+     
+        dataidxs_train = net_dataidx_map_train[net_id]
+        dataidxs_test = net_dataidx_map_test[net_id]
+        if args.noise_type == 'space':
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
+        elif args.noise_type == 'increasing':
+            noise_level = args.noise / (args.n_parties - 1) * net_id
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
         else:
-            calibrated_model = None
+            noise_level = 0
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
 
-        if args.dataset == "shakespeare":
-            train_dl_local = net_dataidx_map_train[net_id]
-            test_dl_local = net_dataidx_map_test[net_id]
-
-            test_correct, test_total, test_avg_loss = compute_accuracy_shakes(local_model, test_dl_local, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_shakes(local_model, train_dl_local, device=device)
-        else:
-            dataidxs_train = net_dataidx_map_train[net_id]
-            dataidxs_test = net_dataidx_map_test[net_id]
-            if args.noise_type == 'space':
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-            elif args.noise_type == 'increasing':
-                noise_level = args.noise / (args.n_parties - 1) * net_id
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
-            else:
-                noise_level = 0
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-
-            if args.calibrated:
-                test_correct, test_total, test_avg_loss = compute_accuracy_loss_cal(local_model, train_dl_local, test_dl_local, args, calibrated_model, device=device)
-                if args.train_acc_pre:
-                    train_correct, train_total, train_avg_loss = compute_accuracy_loss_cal(local_model, train_dl_local, train_dl_local, args, calibrated_model, device=device)
-
-            elif args.k_neighbor:
-                n_train_samples = len(train_dl_local.dataset)
-                capacity = int(args.capacity_ratio * n_train_samples)
-                rng = np.random.default_rng(seed=args.init_seed)
-                # vec_dim = 128*65
-                vec_dim = 128
-                datastore = DataStore(capacity, "random", vec_dim, rng)
-                
-                test_correct, test_total, test_avg_loss = compute_accuracy_loss_knn(local_model, train_dl_local, test_dl_local, datastore, vec_dim, args, device=device)
-                if args.train_acc_pre:
-                    train_correct, train_total, train_avg_loss = compute_accuracy_loss_knn(local_model, train_dl_local, train_dl_local, datastore, vec_dim, args, device=device)
-
-            else:
-                # test_correct, test_total, test_avg_loss = compute_accuracy_loss_hypervit(local_model, test_dl_local, num_class, device=device)
-                # if args.train_acc_pre:
-                #     train_correct, train_total, train_avg_loss = compute_accuracy_loss_hypervit(local_model, train_dl_local, num_class, device=device)
-                test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-                if args.train_acc_pre:
-                    train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-
+        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
         if args.train_acc_pre:
+            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
             train_results[net_id]['loss'] = train_avg_loss 
             train_results[net_id]['correct'] = train_correct
             train_results[net_id]['total'] = train_total
@@ -1959,46 +1546,20 @@ def compute_accuracy_personally(personal_qkv_list, global_model, args, net_datai
         else:
             calibrated_model = None
 
-        if args.dataset == "shakespeare":
-            train_dl_local = net_dataidx_map_train[net_id]
-            test_dl_local = net_dataidx_map_test[net_id]
-
-            test_correct, test_total, test_avg_loss = compute_accuracy_shakes(local_model, test_dl_local, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_shakes(local_model, train_dl_local, device=device)
+        dataidxs_train = net_dataidx_map_train[net_id]
+        dataidxs_test = net_dataidx_map_test[net_id]
+        if args.noise_type == 'space':
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
+        elif args.noise_type == 'increasing':
+            noise_level = args.noise / (args.n_parties - 1) * net_id
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
         else:
-            dataidxs_train = net_dataidx_map_train[net_id]
-            dataidxs_test = net_dataidx_map_test[net_id]
-            if args.noise_type == 'space':
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-            elif args.noise_type == 'increasing':
-                noise_level = args.noise / (args.n_parties - 1) * net_id
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
-            else:
-                noise_level = 0
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-           
-            if args.calibrated:
-                test_correct, test_total, test_avg_loss = compute_accuracy_loss_cal(local_model, train_dl_local, test_dl_local, args, calibrated_model, round, device=device)
-                if args.train_acc_pre:
-                    train_correct, train_total, train_avg_loss = compute_accuracy_loss_cal(local_model, train_dl_local, train_dl_local, args, calibrated_model, round, device=device)
-            
-            elif args.k_neighbor:
-                n_train_samples = len(train_dl_local.dataset)
-                capacity = int(args.capacity_ratio * n_train_samples)
-                rng = np.random.default_rng(seed=args.init_seed)
-                # vec_dim = 128*65
-                vec_dim = 128
-                datastore = DataStore(capacity, "random", vec_dim, rng)
-                
-                test_correct, test_total, test_avg_loss = compute_accuracy_loss_knn(local_model, train_dl_local, test_dl_local, datastore, vec_dim, args, device=device)
-                if args.train_acc_pre:
-                    train_correct, train_total, train_avg_loss = compute_accuracy_loss_knn(local_model, train_dl_local, train_dl_local, datastore, vec_dim, args, device=device)
-            
-            else:
-                test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-                if args.train_acc_pre:
-                    train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
+            noise_level = 0
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+        
+        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
+        if args.train_acc_pre:
+            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
 
         if args.train_acc_pre:
             train_results[net_id]['loss'] = train_avg_loss 
@@ -2060,28 +1621,10 @@ def compute_accuracy_perplus_client(hyper, prototype_dict, class_id_dict, global
         else:
             noise_level = args.noise / (args.n_parties - 1) * net_id
             train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-
-        if args.calibrated:
-            test_correct, test_total, test_avg_loss = compute_accuracy_loss_cal(local_model, train_dl_local, test_dl_local, args, calibrated_model, round, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_loss_cal(local_model, train_dl_local, train_dl_local, args, calibrated_model, round, device=device)
-        
-        elif args.k_neighbor:
-            n_train_samples = len(train_dl_local.dataset)
-            capacity = int(args.capacity_ratio * n_train_samples)
-            rng = np.random.default_rng(seed=args.init_seed)
-            # vec_dim = 128*65
-            vec_dim = 128
-            datastore = DataStore(capacity, "random", vec_dim, rng)
-            
-            test_correct, test_total, test_avg_loss = compute_accuracy_loss_knn(local_model, train_dl_local, test_dl_local, datastore, vec_dim, args, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_loss_knn(local_model, train_dl_local, train_dl_local, datastore, vec_dim, args, device=device)
-
-        else:
-            test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
+ 
+        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
+        if args.train_acc_pre:
+            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
 
         if args.train_acc_pre:
             train_results[net_id]['loss'] = train_avg_loss 
@@ -2129,25 +1672,18 @@ def compute_accuracy_perRod(personal_head_list, global_model, args, net_dataidx_
         p_head.eval()
 
         sample_per_class = alpha_dict[net_id]
-        if args.dataset == "shakespeare":
-            train_dl_local = net_dataidx_map_train[net_id]
-            test_dl_local = net_dataidx_map_test[net_id]
-
-            test_correct, test_total, test_avg_loss = compute_accuracy_shakes(local_model, test_dl_local, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_shakes(local_model, train_dl_local, device=device)
+        
+        dataidxs_train = net_dataidx_map_train[net_id]
+        dataidxs_test = net_dataidx_map_test[net_id]
+        if args.noise_type == 'space':
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
         else:
-            dataidxs_train = net_dataidx_map_train[net_id]
-            dataidxs_test = net_dataidx_map_test[net_id]
-            if args.noise_type == 'space':
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-            else:
-                noise_level = args.noise / (args.n_parties - 1) * net_id
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)          
-            
-            test_correct, test_total, test_avg_loss = compute_accuracy_fedRod(local_model, p_head, test_dl_local, sample_per_class, args, device=device)
-            if args.train_acc_pre:
-                train_correct, train_total, train_avg_loss = compute_accuracy_fedRod(local_model, p_head, train_dl_local, sample_per_class, args, device=device)
+            noise_level = args.noise / (args.n_parties - 1) * net_id
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)          
+        
+        test_correct, test_total, test_avg_loss = compute_accuracy_fedRod(local_model, p_head, test_dl_local, sample_per_class, args, device=device)
+        if args.train_acc_pre:
+            train_correct, train_total, train_avg_loss = compute_accuracy_fedRod(local_model, p_head, train_dl_local, sample_per_class, args, device=device)
 
         if args.train_acc_pre:
             train_results[net_id]['loss'] = train_avg_loss 
@@ -2230,7 +1766,6 @@ def compute_accuracy_perProto(nets, global_protos, args, net_dataidx_map_train, 
 
 
 def compute_accuracy_hphead_client(hyper, personal_qkv_list, global_model, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
-
     hyper.eval()
     if args.train_acc_pre:
         train_results = defaultdict(lambda: defaultdict(list))
@@ -2325,66 +1860,18 @@ class GaussianNoise(object):
 
 
 def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_level=0, net_id=None, total=0, apply_noise=False):
-    if dataset in ('mnist', 'femnist', 'fmnist', 'cifar10','cifar100', 'svhn', 'generated', 'covtype', 'a9a', 'rcv1', 'SUSY'):
-        if dataset == 'mnist':
-            dl_obj = MNIST_truncated
-
-            transform_train = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-            transform_test = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-        elif dataset == 'femnist':
-            dl_obj = FEMNIST
-            transform_train = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-            transform_test = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-        elif dataset == 'fmnist':
-            dl_obj = FashionMNIST_truncated
-            transform_train = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-            transform_test = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-        elif dataset == 'svhn':
-            dl_obj = SVHN_custom
-            transform_train = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-            transform_test = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-
-        elif dataset == 'cifar10':
+    if dataset in ('cifar10','cifar100'):
+        if dataset == 'cifar10':
             dl_obj = CIFAR10_truncated
 
             transform_train = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-                # transforms.Lambda(lambda x: F.pad(
-                #     Variable(x.unsqueeze(0), requires_grad=False),
-                #     (4, 4, 4, 4), mode='reflect').data.squeeze()),
-                # transforms.ToPILImage(),
-                # transforms.RandomCrop(32),
-                # transforms.RandomHorizontalFlip(),
-                # transforms.ToTensor(),
-                # AddGaussianNoise(0., noise_level, net_id, total)
             ])
             # data prep for test set
             transform_test = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-                # AddGaussianNoise(0., noise_level, net_id, total)
                 ])
 
         elif dataset == 'cifar100':
@@ -2393,28 +1880,12 @@ def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_lev
             transform_train = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762))
-                # transforms.Lambda(lambda x: F.pad(
-                #     Variable(x.unsqueeze(0), requires_grad=False),
-                #     (4, 4, 4, 4), mode='reflect').data.squeeze()),
-                # transforms.ToPILImage(),
-                # transforms.RandomCrop(32),
-                # transforms.RandomHorizontalFlip(),
-                # transforms.ToTensor(),
-                # AddGaussianNoise(0., noise_level, net_id, total)
             ])
             # data prep for test set
             transform_test = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762))
-                # AddGaussianNoise(0., noise_level, net_id, total)
                 ])
-
-
-        else:
-            dl_obj = Generated
-            transform_train = None
-            transform_test = None
-
 
         train_ds = dl_obj(datadir, dataidxs=dataidxs, train=True, transform=transform_train, download=False)
         test_ds = dl_obj(datadir, train=False, transform=transform_test, download=False)
@@ -2426,47 +1897,8 @@ def get_dataloader(dataset, datadir, train_bs, test_bs, dataidxs=None, noise_lev
 
 
 def get_divided_dataloader(dataset, datadir, train_bs, test_bs, dataidxs_train, dataidxs_test, noise_level=0, net_id=None, total=0, drop_last=False, apply_noise=False):
-    if dataset in ('mnist', 'femnist', 'fmnist', 'cifar10', 'cifar100', 'svhn', 'generated', 'covtype', 'a9a', 'rcv1', 'SUSY'):
-        if dataset == 'mnist':
-            dl_obj = MNIST_truncated
-
-            transform_train = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-            transform_test = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-        elif dataset == 'femnist':
-            dl_obj = FEMNIST
-            transform_train = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-            transform_test = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-        elif dataset == 'fmnist':
-            dl_obj = FashionMNIST_truncated
-            transform_train = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-            transform_test = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-        elif dataset == 'svhn':
-            dl_obj = SVHN_custom
-            transform_train = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-            transform_test = transforms.Compose([
-                transforms.ToTensor(),
-                AddGaussianNoise(0., noise_level, net_id, total)])
-
-
-        elif dataset == 'cifar10':
+    if dataset in ('cifar10', 'cifar100'):
+        if dataset == 'cifar10':
             dl_obj = CIFAR10_truncated
             if apply_noise:
                 transform_train = transforms.Compose([
@@ -2512,11 +1944,6 @@ def get_divided_dataloader(dataset, datadir, train_bs, test_bs, dataidxs_train, 
                     transforms.ToTensor(),
                     transforms.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762))])
 
-        else:
-            dl_obj = Generated
-            transform_train = None
-            transform_test = None
-
 
         train_ds = dl_obj(datadir, dataidxs=dataidxs_train, train=True, transform=transform_train, download=False)
         test_ds = dl_obj(datadir, dataidxs= dataidxs_test ,train=False, transform=transform_test, download=False)
@@ -2525,60 +1952,6 @@ def get_divided_dataloader(dataset, datadir, train_bs, test_bs, dataidxs_train, 
         test_dl = data.DataLoader(dataset=test_ds, batch_size=test_bs, shuffle=False, drop_last=False)
 
     return train_dl, test_dl, train_ds, test_ds
-
-
-def get_spe_dataloaders(dataset, data_dir, batch_size, chunk_len, is_validation=False):
-
-    inputs, targets = None, None
-
-    train_iterators, val_iterators, test_iterators = [], [], []
-
-    for task_id, task_dir in enumerate(os.listdir(data_dir)):
-        task_data_path = os.path.join(data_dir, task_dir)
-
-        train_iterator = get_spe_loader(dataset=dataset,
-        path=os.path.join(task_data_path, f"train{EXTENSIONS[dataset]}"),
-        batch_size=batch_size, chunk_len=chunk_len, inputs=inputs, targets=targets, train=True)
-
-        val_iterator = get_spe_loader(dataset=dataset,
-        path=os.path.join(task_data_path, f"train{EXTENSIONS[dataset]}"),
-        batch_size=batch_size, chunk_len=chunk_len, inputs=inputs, targets=targets, train=False)
-
-        if is_validation:
-            test_set = "val"
-        else:
-            test_set = "test"
-
-        test_iterator =get_spe_loader(dataset=dataset,
-        path=os.path.join(task_data_path, f"{test_set}{EXTENSIONS[dataset]}"),
-        batch_size=batch_size, chunk_len=chunk_len, inputs=inputs, targets=targets, train=False)
-
-        if test_iterator!=None:
-            train_iterators.append(train_iterator)
-            val_iterators.append(val_iterator)
-            test_iterators.append(test_iterator)
-
-    original_client_num = task_id + 1
-
-    return train_iterators, val_iterators, test_iterators, original_client_num
-
-
-def get_spe_loader(dataset, path, batch_size, train, chunk_len=5, inputs=None, targets=None):
-
-    if dataset == "femnist":
-        dataset = SubFEMNIST(path)
-    elif dataset == "shakespeare":
-        dataset = CharacterDataset(path, chunk_len=chunk_len)
-    else:
-        raise NotImplementedError(f"{dataset} not recognized type; possible are {list(LOADER_TYPE.keys())}")
-
-    if len(dataset) == 0:
-        return
-
-    # drop last batch, because of BatchNorm layer used in mobilenet_v2
-    drop_last = (len(dataset) > batch_size) and train
-
-    return data.DataLoader(dataset, batch_size=batch_size, shuffle=train, drop_last=drop_last, num_workers=NUM_WORKERS)
 
 
 def weights_init(m):
@@ -2650,4 +2023,135 @@ def noise_sample(choice, n_dis_c, dis_c_dim, n_con_c, n_z, batch_size, device):
 
     return noise, idx
 
+
+def compute_accuracy_global(nets, args, net_dataidx_map_train, net_dataidx_map_test, global_test_data, device="cpu"):
+    if args.train_acc_pre:
+        train_results = defaultdict(lambda: defaultdict(list))
+    test_results = defaultdict(lambda: defaultdict(list))
+    for net_id in range(args.n_parties):
+        # print("net_id: ", net_id)
+        local_model = copy.deepcopy(nets[net_id])
+        local_model.eval()
+
+        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, global_test_data, device=device)
+        if args.train_acc_pre:
+            dataidxs_train = net_dataidx_map_train[net_id]
+            dataidxs_test = net_dataidx_map_test[net_id]
+            noise_level = 0
+            train_dl_local, _, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
+        
+            train_results[net_id]['loss'] = train_avg_loss 
+            train_results[net_id]['correct'] = train_correct
+            train_results[net_id]['total'] = train_total
+
+        test_results[net_id]['loss'] = test_avg_loss 
+        test_results[net_id]['correct'] = test_correct
+        test_results[net_id]['total'] = test_total
+
+    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
+    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
+    test_avg_acc = np.mean(test_all_acc)
+
+    if args.train_acc_pre:
+        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
+        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
+        train_acc_pre = np.mean(train_all_acc)
+        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
+    else:
+        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
+
+
+def compute_accuracy_global_two_branch(personal_bn_list, global_model, p_nets, args, net_dataidx_map_train, net_dataidx_map_test, global_test_data, device="cpu"):
+    if args.train_acc_pre:
+        train_results = defaultdict(lambda: defaultdict(list))
+    test_results = defaultdict(lambda: defaultdict(list))
+    for net_id in range(args.n_parties):
+        node_weights = personal_bn_list[net_id]
+        g_net = copy.deepcopy(global_model)
+        g_net.load_state_dict(node_weights, strict=False)
+        g_net.eval()
+        p_net = copy.deepcopy(p_nets[net_id])
+        p_net.eval()
+
+        test_correct, test_total, test_avg_loss = compute_accuracy_pfedKL(g_net, p_net, global_test_data, device=device)
+        if args.train_acc_pre:
+            noise_level = 0
+            dataidxs_train = net_dataidx_map_train[net_id]
+            dataidxs_test = net_dataidx_map_test[net_id]
+            train_dl_local, _, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+            train_correct, train_total, train_avg_loss = compute_accuracy_pfedKL(g_net, p_net, train_dl_local, device=device)
+            train_results[net_id]['loss'] = train_avg_loss 
+            train_results[net_id]['correct'] = train_correct
+            train_results[net_id]['g_loss'] = train_avg_loss[1] 
+            train_results[net_id]['g_correct'] = train_correct[1]
+            train_results[net_id]['p_loss'] = train_avg_loss[2] 
+            train_results[net_id]['p_correct'] = train_correct[2]
+            train_results[net_id]['total'] = train_total
+
+        test_results[net_id]['loss'] = test_avg_loss[0] 
+        test_results[net_id]['correct'] = test_correct[0]
+        test_results[net_id]['g_loss'] = test_avg_loss[1] 
+        test_results[net_id]['g_correct'] = test_correct[1]
+        test_results[net_id]['p_loss'] = test_avg_loss[2] 
+        test_results[net_id]['p_correct'] = test_correct[2]
+        test_results[net_id]['total'] = test_total
+
+    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
+    test_g_avg_loss = np.mean([val['g_loss'] for val in test_results.values()])
+    test_p_avg_loss = np.mean([val['p_loss'] for val in test_results.values()]) 
+
+    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
+    test_avg_acc = np.mean(test_all_acc)
+
+    test_g_all_acc = [val['g_correct'] / val['total'] for val in test_results.values()]
+    test_g_avg_acc = np.mean(test_g_all_acc)
+
+    test_p_all_acc = [val['p_correct'] / val['total'] for val in test_results.values()]
+    test_p_avg_acc = np.mean(test_p_all_acc)
+
+    if args.train_acc_pre:
+        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
+        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
+        train_acc_pre = np.mean(train_all_acc)
+        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
+    else:
+        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
+
+
+def compute_accuracy_global_per_client_simple(global_model, args, net_dataidx_map_train, net_dataidx_map_test, global_test_data, device="cpu"):
+    if args.train_acc_pre:
+        train_results = defaultdict(lambda: defaultdict(list))
+    test_results = defaultdict(lambda: defaultdict(list))
+    local_model = copy.deepcopy(global_model)
+    local_model.eval()
+
+    test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, global_test_data, device=device)
+    if args.train_acc_pre:
+        for net_id in range(args.n_parties):
+            local_model = copy.deepcopy(global_model)
+            local_model.eval()
+        dataidxs_train = net_dataidx_map_train[net_id]
+        dataidxs_test = net_dataidx_map_test[net_id]
+        noise_level = 0
+        train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+        train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
+        train_results[net_id]['loss'] = train_avg_loss 
+        train_results[net_id]['correct'] = train_correct
+        train_results[net_id]['total'] = train_total
+
+    for net_id in range(args.n_parties):
+        test_results[net_id]['loss'] = test_avg_loss 
+        test_results[net_id]['correct'] = test_correct
+        test_results[net_id]['total'] = test_total
+    test_avg_acc = test_correct / test_total
+    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
+
+    if args.train_acc_pre:
+        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
+        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
+        train_acc_pre = np.mean(train_all_acc)
+        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
+    else:
+        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
 

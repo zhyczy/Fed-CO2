@@ -1,12 +1,12 @@
 cd /public/home/caizhy/work/Peer/NIID-Bench-main/
 # salloc -N 1 -n 4 -p debug --gres=gpu:1 --exclude=ai_gpu[34],sist_gpu[45,65,61],sist-a40-07
-python experiments.py --model=cnn-b \
+python glob_exp.py --model=cnn-b \
   --dataset=cifar100 \
-  --alg=pfedKL-abl \
+  --alg=fedavg \
   --lr=0.01 \
   --batch-size=64 \
   --epochs=5 \
-  --n_parties=100 \
+  --n_parties=50 \
   --test_round=2\
   --comm_round=3\
   --eval_step=1 \
@@ -20,10 +20,11 @@ python experiments.py --model=cnn-b \
   --logdir='./logs_emb/' \
   --noise=0\
   --init_seed=0\
-  --sample=0.05\
+  --sample=0.1\
   --show_all_accuracy
 
-  --save_model
+  # --save_model 
+  # local_training, pfedKL, pfedKL-abl
 
 # python experiments.py --model=vit \
 #   --dataset=cifar10 \
