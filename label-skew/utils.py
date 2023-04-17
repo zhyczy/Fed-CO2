@@ -1162,12 +1162,10 @@ def compute_accuracy_local_ft(nets, args, net_dataidx_map_train, net_dataidx_map
 
 
 def compute_accuracy_two_branch(personal_bn_list, global_model, p_nets, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
-
     if args.train_acc_pre:
         train_results = defaultdict(lambda: defaultdict(list))
     test_results = defaultdict(lambda: defaultdict(list))
     for net_id in range(args.n_parties):
-
         node_weights = personal_bn_list[net_id]
         g_net = copy.deepcopy(global_model)
         g_net.load_state_dict(node_weights, strict=False)
@@ -1185,8 +1183,74 @@ def compute_accuracy_two_branch(personal_bn_list, global_model, p_nets, args, ne
         else:
             noise_level = 0
             train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-       
-        
+    
+        test_correct, test_total, test_avg_loss = compute_accuracy_pfedKL(g_net, p_net, test_dl_local, device=device)
+        if args.train_acc_pre:
+            train_correct, train_total, train_avg_loss = compute_accuracy_pfedKL(g_net, p_net, train_dl_local, device=device)
+            train_results[net_id]['loss'] = train_avg_loss 
+            train_results[net_id]['correct'] = train_correct
+            train_results[net_id]['g_loss'] = train_avg_loss[1] 
+            train_results[net_id]['g_correct'] = train_correct[1]
+            train_results[net_id]['p_loss'] = train_avg_loss[2] 
+            train_results[net_id]['p_correct'] = train_correct[2]
+            train_results[net_id]['total'] = train_total
+
+        test_results[net_id]['loss'] = test_avg_loss[0] 
+        test_results[net_id]['correct'] = test_correct[0]
+        test_results[net_id]['g_loss'] = test_avg_loss[1] 
+        test_results[net_id]['g_correct'] = test_correct[1]
+        test_results[net_id]['p_loss'] = test_avg_loss[2] 
+        test_results[net_id]['p_correct'] = test_correct[2]
+        test_results[net_id]['total'] = test_total
+
+    test_total_correct = sum([val['correct'] for val in test_results.values()])
+    test_g_total_correct = sum([val['g_correct'] for val in test_results.values()])
+    test_p_total_correct = sum([val['p_correct'] for val in test_results.values()])
+    test_total_samples = sum([val['total'] for val in test_results.values()])
+    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
+    test_g_avg_loss = np.mean([val['g_loss'] for val in test_results.values()])
+    test_p_avg_loss = np.mean([val['p_loss'] for val in test_results.values()]) 
+
+    test_avg_acc = test_total_correct / test_total_samples
+    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
+    test_g_avg_acc = test_g_total_correct / test_total_samples
+    test_g_all_acc = [val['g_correct'] / val['total'] for val in test_results.values()]
+    test_p_avg_acc = test_p_total_correct / test_total_samples
+    test_p_all_acc = [val['p_correct'] / val['total'] for val in test_results.values()]
+
+    if args.train_acc_pre:
+        train_total_correct = sum([val['correct'] for val in train_results.values()])
+        train_total_samples = sum([val['total'] for val in train_results.values()])
+        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
+        train_acc_pre = train_total_correct / train_total_samples
+
+        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
+        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
+    else:
+        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
+
+
+def compute_accuracy_two_branch_naked(global_model, p_nets, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
+    if args.train_acc_pre:
+        train_results = defaultdict(lambda: defaultdict(list))
+    test_results = defaultdict(lambda: defaultdict(list))
+    for net_id in range(args.n_parties):
+        g_net = copy.deepcopy(global_model)
+        g_net.eval()
+        p_net = copy.deepcopy(p_nets[net_id])
+        p_net.eval()
+
+        dataidxs_train = net_dataidx_map_train[net_id]
+        dataidxs_test = net_dataidx_map_test[net_id]
+        if args.noise_type == 'space':
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
+        elif args.noise_type == 'increasing':
+            noise_level = args.noise / (args.n_parties - 1) * net_id
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
+        else:
+            noise_level = 0
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+    
         test_correct, test_total, test_avg_loss = compute_accuracy_pfedKL(g_net, p_net, test_dl_local, device=device)
         if args.train_acc_pre:
             train_correct, train_total, train_avg_loss = compute_accuracy_pfedKL(g_net, p_net, train_dl_local, device=device)

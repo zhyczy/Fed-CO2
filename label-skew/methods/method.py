@@ -692,10 +692,8 @@ def local_train_net_per_2branch(nets, p_nets, selected, args, net_dataidx_map_tr
                 train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True)
 
         _, testacc = train_net_2branch(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, 
-        args.lr, args.optimizer, args, device=device)
-        
+        args.lr, args.optimizer, args, device=device)   
         logger.info("net %d final test acc %f" % (net_id, testacc))
-
     nets_list = list(nets.values())
     return nets_list
 
