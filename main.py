@@ -116,7 +116,7 @@ if __name__ == '__main__':
             server_model = DigitModel_head().to(device)
         else:
             server_model = AlexNet_peer().to(device)
-        print(" COPA ")
+        print(" COPA  Version: ",args.version)
     elif args.mode == 'moon':
         if args.dataset == 'digits':
             server_model = DigitModel_moon().to(device)
@@ -346,22 +346,12 @@ if __name__ == '__main__':
                                                                valid_onehot, weight_dict, args, train_loaders, test_loaders, optimizers, loss_fun, device, a_iter=a_iter)
         if args.mode == 'moon':
             paggregation_models = copy.deepcopy(models)
-        
+        elif args.mode == 'COPA':
+            extra_modules = {}
+            for client_idx in range(client_num):
+                extra_modules[client_idx] = copy.deepcopy(models[client_idx].head)
         with torch.no_grad():
             # Aggregation
-            # if len(weight_dict[0]) != 0:
-            #     assert args.version in [39, 40, 41, 58, 59, 60]
-            #     server_model, models, global_prototypes = communication(args, server_model, models, personalized_models, extra_modules, paggregation_models, weight_dict, proto_dict, a_iter)
-            #     for ccidx in range(client_num):
-            #         print("Dataset: ", datasets[ccidx], " weight list: ", weight_dict[ccidx])
-            #     if args.log:
-            #         for ccidx in range(client_num):
-            #             wei_list = weight_dict[ccidx]
-            #             if args.dataset == 'domainnet':
-            #                 logfile.write(' Site-{:<10s}| w1: {:.4f} | w2: {:.4f} | w3: {:.4f} | w4: {:.4f} | w5: {:.4f} | w6: {:4f}\n'.format(datasets[ccidx], wei_list[0], wei_list[1], wei_list[2], wei_list[3], wei_list[4], wei_list[5]))
-            #             else:
-            #                 logfile.write(' Site-{:<10s}| w1: {:.4f} | w2: {:.4f} | w3: {:.4f} | w4: {:.4f}\n'.format(datasets[ccidx], wei_list[0], wei_list[1], wei_list[2], wei_list[3]))
-            # else:
             server_model, models, global_prototypes = communication(args, server_model, models, personalized_models, extra_modules, paggregation_models, client_weights, proto_dict, a_iter)
 
         if args.version in [70, 76, 81, 57, 73, 90]:
@@ -380,8 +370,7 @@ if __name__ == '__main__':
                     logfile.write(' Site-{:<10s}| lambda_g: {:.4f} | lambda_p: {:.4f}\n'.format(datasets[ccidx], lambda_g[0].item(), lambda_p[0].item()))
 
 
-        with torch.no_grad():
-                
+        with torch.no_grad():     
             # Report loss after aggregation
             for client_idx, model in enumerate(models):
                 if args.mode in ['peer', 'fedper', 'fedrod']:
@@ -421,18 +410,9 @@ if __name__ == '__main__':
                         print(' Site-{:<10s}| Val  Loss: {:.4f} | Val  Acc: {:.4f}'.format(datasets[client_idx], val_loss, val_acc))
                     if args.log:
                         if args.mode == 'peer':
-                            #G acc is higher than P acc
-                            # if val_acc[1] > val_acc[2]:
-                            #     valid_onehot[client_idx] = 1
-                            # else:
-                            #     valid_onehot[client_idx] = 0
-
                             logfile.write(' Site-{:<10s}| Val Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Val Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,val_loss[0], val_loss[1], val_loss[2], val_acc[0], val_acc[1], val_acc[2]))
                         else:
                             logfile.write(' Site-{:<10s}| Val  Loss: {:.4f} | Val  Acc: {:.4f}\n'.format(datasets[client_idx], val_loss, val_acc))
-
-                # if args.mode == 'peer' and args.version in [46, 47, 48, 49, 50, 34, 35]:
-                #     print(valid_onehot)
 
                 # Record best
                 if np.mean(val_acc_list) > np.mean(best_acc):
@@ -475,7 +455,7 @@ if __name__ == '__main__':
                                 }, SAVE_PATH)
                         best_changed = False
                         for client_idx, datasite in enumerate(datasets):
-                            _, test_acc = test(client_idx, models[client_idx], None, None, None, test_loaders[client_idx], loss_fun, device, args, None, None)
+                            _, test_acc = test(client_idx, models[client_idx], None, None, extra_modules, test_loaders[client_idx], loss_fun, device, args, None, None)
                             print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}'.format(datasite, best_epoch, test_acc))
                             if args.log:
                                 logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}\n'.format(datasite, best_epoch, test_acc))
@@ -693,7 +673,7 @@ if __name__ == '__main__':
                 if a_iter<=15 or (a_iter+1)%50==0:
                     if args.mode in ['fedbn', 'local', 'AlignFed', 'COPA']:
                         for client_idx, datasite in enumerate(datasets):
-                            _, test_acc = test(client_idx, models[client_idx], None, None, None, test_loaders[client_idx], loss_fun, device, args, None, None)
+                            _, test_acc = test(client_idx, models[client_idx], None, None, extra_modules, test_loaders[client_idx], loss_fun, device, args, None, None)
                             print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}'.format(datasite, a_iter, test_acc))
                             if args.log:
                                 logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}\n'.format(datasite, a_iter, test_acc))
@@ -727,7 +707,7 @@ if __name__ == '__main__':
                 if args.dataset != 'digits':
                     if args.mode in ['fedbn', 'local', 'AlignFed', 'COPA']:
                         for client_idx, datasite in enumerate(datasets):
-                            _, test_acc = test(client_idx, models[client_idx], None, None, None, test_loaders[client_idx], loss_fun, device, args, None, None)
+                            _, test_acc = test(client_idx, models[client_idx], None, None, extra_modules, test_loaders[client_idx], loss_fun, device, args, None, None)
                             print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}'.format(datasite, best_epoch, test_acc))
                             if args.log:
                                 logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}\n'.format(datasite, best_epoch, test_acc))

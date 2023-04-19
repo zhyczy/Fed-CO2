@@ -152,8 +152,13 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
 
 
 def test(client_idx, model, p_model, a_model, extra_modules, data_loader, loss_fun, device, args, hnet, global_prototype, flog=False):
-    if args.mode in ['fedbn', 'fedavg', 'fedprox', 'local', 'fedtp', 'fedap', 'AlignFed', 'COPA', 'moon']:
+    if args.mode in ['fedbn', 'fedavg', 'fedprox', 'local', 'fedtp', 'fedap', 'AlignFed', 'moon']:
         test_loss, test_acc = normal_test(model, data_loader, loss_fun, device)
+    elif args.mode == 'COPA':
+        if args.version == 1:
+            test_loss, test_acc = normal_test(model, data_loader, loss_fun, device)
+        elif args.version == 2:
+            test_loss, test_acc = COPA_test(model, extra_modules, data_loader, loss_fun, client_idx, device)
     elif args.mode == 'peer':
         if args.version in [70, 76, 81, 57, 73, 90]:
             test_loss, test_acc = peer_test_lambda(model, p_model, extra_modules[client_idx], data_loader, loss_fun, device)
@@ -354,6 +359,33 @@ def rod_test(model, p_model, data_loader, loss_fun, device):
         pred = output.data.max(1)[1]
         correct += pred.eq(target.view(-1)).sum().item()
 
+    return loss_all / len(data_loader), correct/total
+
+
+def COPA_test(model, extra_modules, data_loader, loss_fun, client_idx, device):
+    client_num = len(extra_modules.keys())
+    assert client_num != 0
+    model.eval()
+    loss_all = 0
+    total = 0
+    correct = 0
+    for data, target in data_loader:
+        data = data.to(device)
+        target = target.to(device)
+        u_feature = model.produce_feature(data)
+        output = model.head(u_feature)
+        for idxx in range(client_num):
+            if idxx != client_idx:
+                Spe_classifier = extra_modules[idxx]
+                Spe_classifier.eval()
+                output_gen = Spe_classifier(u_feature)
+                output += output_gen
+        output = output/client_num
+        loss = loss_fun(output, target)
+        loss_all += loss.item()
+        total += target.size(0)
+        pred = output.data.max(1)[1]
+        correct += pred.eq(target.view(-1)).sum().item()
     return loss_all / len(data_loader), correct/total
 
 
