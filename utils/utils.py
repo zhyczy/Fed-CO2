@@ -63,6 +63,28 @@ def communication(args, server_model, models, p_models, extra_modules, paggre_mo
                             server_model.state_dict()[key].data.copy_(temp)
                             for client_idx in range(client_num):
                                 models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+            elif args.version in [92, 94]:
+                for key in server_model.state_dict().keys():
+                    if 'classifier' not in key:
+                        if 'num_batches_tracked' in key:
+                            server_model.state_dict()[key].data.copy_(models[0].state_dict()[key])
+                        else:
+                            temp = torch.zeros_like(server_model.state_dict()[key])
+                            for client_idx in range(client_num):
+                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
+                            server_model.state_dict()[key].data.copy_(temp)
+                            for client_idx in range(client_num):
+                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
+            elif args.version in [93, 95]:
+                for key in server_model.state_dict().keys():
+                    if 'classifier' not in key:
+                        if 'bn' not in key:
+                            temp = torch.zeros_like(server_model.state_dict()[key], dtype=torch.float32)
+                            for client_idx in range(client_num):
+                                temp += client_weights[client_idx] * models[client_idx].state_dict()[key]
+                            server_model.state_dict()[key].data.copy_(temp)
+                            for client_idx in range(client_num):
+                                models[client_idx].state_dict()[key].data.copy_(server_model.state_dict()[key])
             else:
                 for key in server_model.state_dict().keys():
                     if 'num_batches_tracked' in key:

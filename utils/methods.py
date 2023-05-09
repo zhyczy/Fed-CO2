@@ -51,7 +51,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
         Specific_head = {}
         Specific_adaptor = {}
 
-        if args.version not in [1, 17, 66, 67, 68, 71, 73, 78, 79, 80]:
+        if args.version not in [1, 17, 66, 67, 68, 71, 73, 78, 79, 80, 94, 95]:
             for client_idx in range(client_num):
                 Specific_head[client_idx] = copy.deepcopy(personalized_models[client_idx].classifier)
 
@@ -72,7 +72,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
             p_optimizer = optim.SGD(params=personalized_models[client_idx].parameters(), lr=args.lr)
             criterion_ba = nn.CrossEntropyLoss().to(device)
     
-            if args.version in [17, 71]:
+            if args.version in [17, 71, 94, 95]:
                 train_loss, train_acc = train_v0(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                     p_optimizer, loss_fun, criterion_ba, device)
 
@@ -123,7 +123,7 @@ def local_training(models, personalized_models, paggregation_models, hnet, serve
                 train_loss, train_acc = train_gen_kl_initialization(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
 
-            elif args.version == 56:
+            elif args.version in [56, 92 ,93]:
                 train_loss, train_acc = train_gen_full_kl_initialization_full(model, personalized_models[client_idx], train_loaders[client_idx], optimizers[client_idx], 
                                                   p_optimizer, loss_fun, criterion_ba, Specific_head, client_idx, a_iter, device)
 

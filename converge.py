@@ -334,12 +334,6 @@ if __name__ == '__main__':
                     print(' Site-{:<10s}| Train Loss: {:.4f} | Train Acc: {:.4f}'.format(datasets[client_idx] ,train_loss, train_acc))
                     train_acc_vec[client_idx].append(train_acc)
                     train_loss_vec[client_idx].append(train_loss)
-                # if args.log:
-                #     if args.mode == 'peer':
-                #         logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | G_branch Loss: {:.4f} | P_branch Loss: {:.4f} | Train Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasets[client_idx] ,train_loss[0], train_loss[1], train_loss[2], train_acc[0], train_acc[1], train_acc[2]))
-                #     else:
-                #         logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | Train Acc: {:.4f}\n'.format(datasets[client_idx] ,train_loss, train_acc))
-            
     
             if args.mode in ['fedbn', 'local', 'AlignFed', 'COPA']:
                 for client_idx, datasite in enumerate(datasets):
@@ -347,8 +341,7 @@ if __name__ == '__main__':
                     print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}'.format(datasite, a_iter, test_acc))
                     test_acc_vec[client_idx].append(test_acc)
                     test_loss_vec[client_idx].append(test_loss)
-                    # if args.log:
-                    #     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}\n'.format(datasite, a_iter, test_acc))
+
             elif args.mode.lower() in ['peer', 'fedper', 'fedrod']:
                 for client_idx, datasite in enumerate(datasets):
                     a_model = None
@@ -365,27 +358,20 @@ if __name__ == '__main__':
                         print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}'.format(datasite, a_iter, test_acc))
                         test_acc_vec[client_idx].append(test_acc)
                         test_loss_vec[client_idx].append(test_loss)
-                    # if args.log:
-                    #     if args.mode == 'peer':
-                    #         logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f} | G Acc: {:.4f} | P Acc: {:.4f}'.format(datasite, a_iter, test_acc[0], test_acc[1], test_acc[2]))
-                    #     else:
-                    #         logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}\n'.format(datasite, a_iter, test_acc))
+                    
             elif args.mode.lower() == 'fedtp':
                 for client_idx, datasite in enumerate(datasets):
                     test_loss, test_acc = test(client_idx, server_model, None, None, None, test_loaders[client_idx], loss_fun, device, args, hnet, None)
                     print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}'.format(datasite, a_iter, test_acc))
                     test_acc_vec[client_idx].append(test_acc)
                     test_loss_vec[client_idx].append(test_loss)
-                    # if args.log:
-                    #     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}\n'.format(datasite, a_iter, test_acc))
+                    
             else:
                 for client_idx, datasite in enumerate(datasets):
                     test_loss, test_acc = test(client_idx, server_model, None, None, None, test_loaders[client_idx], loss_fun, device, args, None, None)
                     print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}'.format(datasite, a_iter, test_acc))
                     test_acc_vec[client_idx].append(test_acc)
                     test_loss_vec[client_idx].append(test_loss)
-                    # if args.log:
-                    #     logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}\n'.format(datasite, a_iter, test_acc))
 
         if log:
             logfile.flush()

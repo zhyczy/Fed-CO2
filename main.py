@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 import pickle as pkl
-from utils.data_utils import prepare_data_domainNet, prepare_data_officeHome, prepare_data_digits
+from utils.data_utils import prepare_data_domainNet, prepare_data_officeHome, prepare_data_digits, prepare_data_domainNet_partition, prepare_data_domainNet_partition_train
 from utils.methods import local_training
 from utils.utils import  communication, test, set_client_weight, visualize, log_write_dictionary, show_dictionary, visualize_combination, adapt_lambda
 from utils.func_v import definite_version
@@ -48,13 +48,26 @@ if __name__ == '__main__':
     parser.add_argument('--version', type=int, default=1)
     parser.add_argument('--backbone', type=str, default='alexnet')
     parser.add_argument('--save_model', action='store_true')
+    parser.add_argument('--imbalance', action='store_true')
+    parser.add_argument('--imbalance_train', action='store_true')
     parser.add_argument('--reg_value', type=float, default=10)
+    parser.add_argument('--beta', type=float, default=0.3)
 
     args = parser.parse_args()
+    data_num_list = []
 
     if args.dataset == 'domainnet':
         exp_folder = 'fed_domainnet'
-        train_loaders, val_loaders, test_loaders = prepare_data_domainNet(args)
+        if args.imbalance:
+            print("label skew in Train and Test")
+            train_loaders, val_loaders, test_loaders, data_num_list = prepare_data_domainNet_partition(args)
+        elif args.imbalance_train:
+            print("label skew in Train")
+            print("Dirichlet alpha value: ", args.beta)
+            train_loaders, test_loaders, data_num_list = prepare_data_domainNet_partition_train(args)
+        else:
+            print("No label skew")
+            train_loaders, val_loaders, test_loaders = prepare_data_domainNet(args)
     elif args.dataset == 'office_home':
         exp_folder = 'fed_office'
         train_loaders, val_loaders, test_loaders = prepare_data_officeHome(args)
@@ -104,8 +117,10 @@ if __name__ == '__main__':
         else:
             if args.version in [18, 25, 63, 70, 76, 81, 37, 56, 57,
                                 66, 67, 68, 69, 71, 73, 78,
-                                79, 80, 82, 83, 88, 89, 90, 91]:
+                                79, 80, 82, 83, 88, 89, 90, 91, 93, 95]:
                 server_model = AlexNet().to(device)
+            elif args.version in [92, 94]:
+                server_model = AlexNet_rod().to(device)
             else:
                 server_model = AlexNet_peer().to(device)
     elif args.mode == 'AlignFed':
@@ -148,7 +163,15 @@ if __name__ == '__main__':
 
     # federated client number
     client_num = len(datasets)
-    client_weights = [1/client_num for i in range(client_num)]
+    if args.imbalance:
+        total_num = sum(data_num_list)
+        print(data_num_list)
+        # print(total_num)
+        client_weights = [x/total_num for x in data_num_list]
+        print(client_weights)
+        # assert False
+    else:
+        client_weights = [1/client_num for i in range(client_num)]
     
     # each local client model
     models = [copy.deepcopy(server_model).to(device) for idx in range(client_num)]
@@ -237,6 +260,18 @@ if __name__ == '__main__':
 
         elif args.version == 91:
             print("Version91: Version56 and now we merge two phases together")
+
+        elif args.version == 92:
+            print("Version92: CO2-pFed personal per")
+
+        elif args.version == 93:
+            print("Version93: CO2-pFed + personal per")
+
+        elif args.version == 94:
+            print("Version94: simple CO2-pFed personal per")
+
+        elif args.version == 95:
+            print("version95: simple CO2-pFed + personal per")
 
         else:
             definite_version(args.version)
@@ -390,7 +425,7 @@ if __name__ == '__main__':
                     else:
                         logfile.write(' Site-{:<10s}| Train Loss: {:.4f} | Train Acc: {:.4f}\n'.format(datasets[client_idx] ,train_loss, train_acc))
 
-            if args.dataset != 'digits':
+            if args.dataset != 'digits' and args.imbalance_train == False:
                 # Validation
                 val_acc_list = [None for j in range(client_num)]
                 for client_idx, model in enumerate(models):
@@ -704,7 +739,7 @@ if __name__ == '__main__':
                                 logfile.write(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}\n'.format(datasite, a_iter, test_acc))
 
             if a_iter == args.iters-1:
-                if args.dataset != 'digits':
+                if args.dataset != 'digits' and args.imbalance_train == False:
                     if args.mode in ['fedbn', 'local', 'AlignFed', 'COPA']:
                         for client_idx, datasite in enumerate(datasets):
                             _, test_acc = test(client_idx, models[client_idx], None, None, extra_modules, test_loaders[client_idx], loss_fun, device, args, None, None)

@@ -1,9 +1,9 @@
-# python main.py  --mode peer --log --version 91
+python main.py  --mode peer --log --version 71 --imbalance_train
 # python main.py  --mode peer --log --version 18  --dataset  office_home  --save_path ../checkpoint/office_home
 # python main.py  --mode COPA --log --version 1  --dataset  digits  --save_path ../checkpoint/digits
 # python main.py  --mode moon --log --version 1  
 
-python main.py  --mode COPA --log --version 2
+# python main.py  --mode COPA --log --version 2
 # python main.py  --mode COPA --log --version 2  --dataset  office_home  --save_path ../checkpoint/office_home
 # python main.py  --mode COPA --log --version 2  --dataset  digits  --save_path ../checkpoint/digits
 
