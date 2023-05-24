@@ -37,7 +37,7 @@ def get_args():
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.01)')
     parser.add_argument('--epochs', type=int, default=1, help='number of local epochs')
     parser.add_argument('--n_parties', type=int, default=10,  help='number of workers in a distributed cluster')
-    parser.add_argument('--alg', type=str, default='hyperVit',
+    parser.add_argument('--alg', type=str, default='fed-co2',
                             help='communication strategy: fedavg/fedprox')
     parser.add_argument('--comm_round', type=int, default=1500, help='number of maximum communication roun')
     parser.add_argument('--is_same_initial', type=int, default=1, help='Whether initial all the models with the same parameters in fedavg')
@@ -64,58 +64,11 @@ def get_args():
     parser.add_argument("--definite_selection", action='store_true')
     parser.add_argument("--show_all_accuracy", action='store_true')
 
-    """
-    Used for hyperVit
-    """
-    parser.add_argument('--depth', type=int, default=6)
-    parser.add_argument('--hyper_hid', type=int, default=100, help="hypernet hidden dim")
-    parser.add_argument("--n-hidden", type=int, default=3, help="num. hidden layers")
-    parser.add_argument('--layer_emd', action='store_true')
-    parser.add_argument("--balanced_soft_max", action='store_true')
-    parser.add_argument("--client_embed_size", type=int, default=128)
-
-    """
-    Used for protoVit 
-    """
-    parser.add_argument('--version', type=int, default=7)
-    parser.add_argument('--log_flag', default=True)
-    parser.add_argument('--beginning_round', type=int, default=50)
-    parser.add_argument('--update_round', type=int, default=20)
-    parser.add_argument('--calibrated', action='store_true')
-    parser.add_argument('--lambda_value', type=float, default=0.5)
-    parser.add_argument('--no_mlp_head', action='store_true')
-    parser.add_argument('--position_embedding', action='store_true')
-    parser.add_argument('--k_neighbor', action='store_true')
-    parser.add_argument('--similarity', action='store_true')
-
-    """
-    Used for knn-per
-    """
-    parser.add_argument('--capacity_ratio', type=float, default=1.0)
-    parser.add_argument('--k_value', default=10)
-    parser.add_argument('--knn_weight', type=float, default=0.6)
-
-    """
-    Used for pfedMe
-    pfedMe alpha is inner loop learning rate, here we let is same to our learning rate
-    """
-    parser.add_argument('--pfedMe_k', type=int, default=5)
-    parser.add_argument('--pfedMe_lambda', type=float, default=15)
-    parser.add_argument('--pfedMe_beta', type=float, default=1)
-    parser.add_argument('--pfedMe_mu', type=float, default=0)
 
     """
     Used for fedRod
     """
     parser.add_argument('--use_hyperRod', action='store_true')
-
-    """
-    Used for fedproto
-    standard deviation: 2; rounds: 110; weight of proto loss: 0.1 
-    local_bs 32
-
-    """
-    parser.add_argument('--fedproto_lambda', default=0.1)
 
     """
     Used for moon
@@ -144,14 +97,6 @@ def init_nets(net_configs, dropout_p, n_parties, args):
                 net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=10)
             elif args.dataset in ("cifar100"):
                 net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=100)
-        
-        elif args.model == "vit":
-            if args.dataset == "cifar10":
-                net = ViT(image_size = 32, patch_size = 4, num_classes = 10, dim = 128, depth = args.depth, heads = 8, mlp_dim = 256,
-                  dropout = 0.1, emb_dropout = 0.1)      
-            elif args.dataset == "cifar100":
-                net = ViT(image_size=32, patch_size=4, num_classes=100, dim=128, depth = args.depth, heads=8, mlp_dim=256,
-                          dropout=0.1, emb_dropout=0.1)
 
         elif args.model == "cnn":
             if args.dataset == "cifar10":
@@ -164,12 +109,6 @@ def init_nets(net_configs, dropout_p, n_parties, args):
                 net = CNN_B(n_kernels=16)
             elif args.dataset == "cifar100":
                 net = CNN_B(n_kernels=16, out_dim=100)
-
-        elif args.model == "mobilent":
-            if args.dataset == "cifar10":
-                net = Mobilenet(n_classes=10, pretrained=True)
-            elif args.dataset == "cifar100":
-                net = Mobilenet(n_classes=100, pretrained=True)
 
         else:
             raise NotImplementedError("not supported yet")
@@ -184,51 +123,6 @@ def init_nets(net_configs, dropout_p, n_parties, args):
         layer_type.append(k)
 
     return nets, model_meta_data, layer_type
-
-
-def init_hyper(args, sam_node=None):
-    # embed_dim = int(1 + args.n_parties / 4) 
-    embed_dim = args.client_embed_size
-    batch_node = int(args.n_parties * args.sample)
-    if args.model == "vit":
-        if args.layer_emd:
-            if args.dataset == "cifar10":
-                hnet = Layer_ViTHyper(args, args.n_parties, embed_dim, hidden_dim=args.hyper_hid, dim=128,
-                                heads=8, dim_head=64, n_hidden=args.n_hidden, depth=args.depth,
-                                client_sample=batch_node)
-
-            elif args.dataset == "cifar100":
-                hnet = Layer_ViTHyper(args, args.n_parties, embed_dim, hidden_dim=args.hyper_hid, dim=128,
-                                heads=8, dim_head=64, n_hidden=args.n_hidden, depth=args.depth,
-                                client_sample=batch_node)
-        else:
-            if args.alg == "protoVit":
-                if args.dataset == "cifar10":
-                    hnet = ProtoHyper(args.n_parties, args=args, hidden_dim=args.hyper_hid, dim=128, 
-                              heads = 8, dim_head = 64, n_hidden=args.n_hidden, depth=args.depth, client_sample=batch_node)
-            
-                elif args.dataset == "cifar100":
-                    hnet = ProtoHyper(args.n_parties, args=args, hidden_dim=args.hyper_hid, dim=128,
-                                heads=8, dim_head=64, n_hidden=args.n_hidden, depth=args.depth, client_sample=batch_node)
-
-            else:
-                if args.dataset == "cifar10":
-                    hnet = ViTHyper(args.n_parties, embed_dim, hidden_dim = args.hyper_hid, dim=128, 
-                              heads = 8, dim_head = 64, n_hidden = args.n_hidden, depth=args.depth, client_sample=batch_node)
-                
-                elif args.dataset == "cifar100":
-                    hnet = ViTHyper(args.n_parties, embed_dim, hidden_dim = args.hyper_hid, dim=128,
-                                heads=8, dim_head=64, n_hidden = args.n_hidden, depth=args.depth, client_sample=batch_node)
-    
-    elif args.model == "cnn":
-        if args.dataset == "cifar10":
-            hnet = CNNHyper(args.n_parties, embed_dim, hidden_dim=args.hyper_hid, n_hidden=args.n_hidden, n_kernels=16)
-        
-        elif args.dataset == "cifar100":
-            hnet = CNNHyper(args.n_parties, embed_dim, hidden_dim=args.hyper_hid,
-                            n_hidden=args.n_hidden, n_kernels=16, out_dim=100)
-
-    return hnet
 
 
 def init_personalized_parameters(args, client_number=None):
@@ -291,7 +185,7 @@ def init_personalized_parameters(args, client_number=None):
                 para_dict["mlp_head.1.bias"] = None
                 personalized_pred_list.append(para_dict)
 
-    elif args.alg in ['fedBN', 'fedAP', 'pfedKL', 'pfedKL-abl']:
+    elif args.alg in ['fedBN', 'fedAP', , 'fed-co2']:
         for nndx in range(args.n_parties):
             bn_dict = OrderedDict()
             for ll in range(4):
@@ -574,191 +468,7 @@ if __name__ == '__main__':
         with open(str(save_path / json_file_opt), "w") as file:
             json.dump(results_dict, file, indent=4)
 
-
-    elif args.alg == 'hyperCnn':
-        if args.model != "cnn":
-            raise NotImplementedError("hyperCnn only supports cnn backbone")
-        logger.info("Initializing nets")
-        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-
-        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
-        global_model = global_models[0]
-
-        logger.info("Initializing hyper")
-        hnet = init_hyper(args).to(device)
-
-        optimizers = {
-            'sgd': torch.optim.SGD(
-                params=hnet.parameters(), lr=args.lr, momentum=0.9, weight_decay=1e-3
-            ),
-            'adam': torch.optim.Adam(params=hnet.parameters(), lr=args.lr)
-        }
-        optimizer = optimizers['sgd']
-
-        global_para = global_model.state_dict()
-        if args.is_same_initial:
-            for net_id, net in nets.items():
-                net.load_state_dict(global_para)
-
-        for round in range(args.comm_round):
-            logger.info("in comm round: %d" % round)
-
-            hnet.train()
-            grads_update = []
-
-            arr = np.arange(args.n_parties)
-            np.random.shuffle(arr)
-            selected = arr[:int(args.n_parties * args.sample)]
-            weights = {}
-
-            if round == 0:
-                if args.is_same_initial:
-                    for ix in range(len(selected)):
-                        idx = selected[ix]
-                        node_weights = hnet(torch.tensor([idx], dtype=torch.long).to(device))
-                        weights[ix] = node_weights
-                        nets[idx].load_state_dict(node_weights)
-            else:
-                for ix in range(len(selected)):
-                    idx = selected[ix]
-                    node_weights = hnet(torch.tensor([idx], dtype=torch.long).to(device))
-                    weights[ix] = node_weights
-                    nets[idx].load_state_dict(node_weights)
-
-            local_train_net_per(nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, logger, device=device)
-
-            # update global model
-            total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
-            fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
-
-            for idx in range(len(selected)):
-                final_state = nets[selected[idx]].state_dict()
-
-                node_weights = weights[idx]
-                inner_state = OrderedDict({k: tensor.data for k, tensor in node_weights.items()})
-                delta_theta = OrderedDict({k: inner_state[k] - final_state[k] for k in node_weights.keys()})
-                hnet_grads = torch.autograd.grad(
-                    list(node_weights.values()), hnet.parameters(), grad_outputs=list(delta_theta.values()), retain_graph=True
-                )
-
-                if idx == 0:
-                    grads_update = [fed_avg_freqs[idx]*x  for x in hnet_grads]
-                else:
-                    for g in range(len(hnet_grads)):
-                        grads_update[g] += fed_avg_freqs[idx] * hnet_grads[g]
-
-            optimizer.zero_grad()
-            for p, g in zip(hnet.parameters(), grads_update):
-                p.grad = g
-            optimizer.step()
-
-            if (round+1)>=test_round and (round+1)%eval_step == 0:
-                # train_results, train_avg_loss, train_acc, train_all_acc = compute_accuracy_percnn_client(hnet, global_model, args, net_dataidx_map_train,test=False, device=device)
-                # test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_percnn_client(hnet, global_model, args, net_dataidx_map_train, device=device)
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_percnn_client(
-                    hnet, global_model, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
-            
-                if args.log_flag:
-                    logger.info('>> Global Model Train accuracy: %f' % train_acc)
-                    logger.info('>> Global Model Test accuracy: %f' % test_acc)
-                    logger.info('>> Test avg loss: %f' %test_avg_loss)
-
-                results_dict['train_avg_loss'].append(train_avg_loss)
-                results_dict['train_avg_acc'].append(train_acc)
-                results_dict['test_avg_loss'].append(test_avg_loss)
-                results_dict['test_avg_acc'].append(test_acc*100)
-
-        save_path = Path("results_table/"+save_path)
-        save_path.mkdir(parents=True, exist_ok=True)
-
-        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.comment
-        print("test_all_acc: ", test_all_acc)
-        if args.save_model:
-            logger.info("Saving model")
-            outfile_hp = os.path.join(save_path,  'HY_1500.tar')
-            outfile_vit = os.path.join(save_path, 'cnn_1500.tar')
-            torch.save({'epoch':args.comm_round+1, 'state':hnet.state_dict()}, outfile_hp)
-            torch.save({'epoch':args.comm_round+1, 'state':global_model.state_dict()}, outfile_vit)
-
-        json_file_opt = "results_"+accessories+".json"
-        with open(str(save_path / json_file_opt), "w") as file:
-            json.dump(results_dict, file, indent=4)
-
-    elif args.alg == 'pfedMe':
-        if args.model not in ['lstm', 'transformer', 'vit', 'cnn']:
-            raise NotImplementedError("pfedMe only supports lstm, cnncifar backbone")
-        logger.info("Initializing nets")
-
-        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
-        global_model = global_models[0]
-
-        global_para = global_model.state_dict()
-
-        if args.is_same_initial:
-            for net_id, net in nets.items():
-                net.load_state_dict(global_para)
-
-        for round in range(args.comm_round):
-            logger.info("in comm round: %d" %round)
-
-            arr = np.arange(args.n_parties)
-            np.random.shuffle(arr)
-            selected = arr[:int(args.n_parties * args.sample)]
-
-            update_dict = local_train_net_pfedMe(nets, selected, global_model, args, net_dataidx_map_train, net_dataidx_map_test, logger, device=device)
-            # update global model
-            total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
-            fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
-
-            # prev_global = copy.deepcopy(list(global_model.parameters()))
-
-            for param in global_model.parameters():
-                param.data.zero_()
-
-            for idx in range(len(selected)):
-                net_para = update_dict[selected[idx]]
-                if idx == 0:
-                    for param, new_param in zip(global_model.parameters(), net_para):
-                        param.data = new_param.data.clone() * fed_avg_freqs[idx]
-                else:
-                    for param, new_param in zip(global_model.parameters(), net_para):
-                        param.data += new_param.data.clone() * fed_avg_freqs[idx]
-            # for pre_param, param in zip(prev_global, global_model.parameters()):
-            #     param.data = (1 - args.pfedMe_beta)*pre_param.data + args.pfedMe_beta*param.data
-
-            if (round+1)>=test_round and (round+1)%eval_step == 0:
-                itrain_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_local(
-                nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
-
-                if args.log_flag:
-                    logger.info('>> Global Model Train accuracy: %f' % train_acc)
-                    logger.info('>> Global Model Test accuracy: %f' % test_acc)
-                    logger.info('>> Test avg loss: %f' %test_avg_loss)
-
-                results_dict['train_avg_loss'].append(train_avg_loss)
-                results_dict['train_avg_acc'].append(train_acc)
-                results_dict['test_avg_loss'].append(test_avg_loss)
-                results_dict['test_avg_acc'].append(test_acc*100)
-
-        save_path = Path("results_table/"+save_path)
-        save_path.mkdir(parents=True, exist_ok=True)
-         
-        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.comment
-
-        if args.save_model:
-            logger.info("Saving model")
-            # chose_arr = [3,4,5]
-            chose_arr = np.arange(args.n_parties)
-            for node_idx in chose_arr:
-                outfile_vit = os.path.join(save_path, 'Vit_'+str(node_idx)+'_1500.tar')
-                torch.save({'epoch':args.comm_round+1, 'state':nets[node_idx].state_dict()}, outfile_vit)
-
-        json_file_opt = "results_"+accessories+".json"
-        with open(str(save_path / json_file_opt), "w") as file:
-            json.dump(results_dict, file, indent=4)  
-
-    elif args.alg == 'fedPer':
+    elif args.alg == 'fedper':
         if args.model not in ['cnn', 'vit', 'transformer', 'lstm']:
             raise NotImplementedError("fedPer uses cnn as backbone")
         logger.info("Initializing nets")
@@ -861,7 +571,7 @@ if __name__ == '__main__':
         with open(str(save_path / json_file_opt), "w") as file:
             json.dump(results_dict, file, indent=4)
 
-    elif args.alg == 'fedRod':
+    elif args.alg == 'fedrod':
         if args.model not in ['cnn', 'vit', 'transformer', 'lstm']:
             raise NotImplementedError("fedRod uses cnn as backbone")
         logger.info("Initializing nets")
@@ -996,7 +706,7 @@ if __name__ == '__main__':
         with open(str(save_path / json_file_opt), "w") as file:
             json.dump(results_dict, file, indent=4)
 
-    elif args.alg == 'fedBN':
+    elif args.alg == 'fedbn':
         if args.model != 'cnn-b':
             raise NotImplementedError("fedBN uses cnn with BN.")
         logger.info("Initializing nets")
@@ -1094,114 +804,9 @@ if __name__ == '__main__':
         with open(str(save_path / json_file_opt), "w") as file:
             json.dump(results_dict, file, indent=4)
 
-    elif args.alg == 'pfedKL':
+    elif args.alg == 'fed-co2':
         if args.model != 'cnn-b':
-            raise NotImplementedError("pfedKL uses cnn-b with BN.")
-        logger.info("Initializing nets")
-
-        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-        local_nets, _, _ = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
-        global_model = global_models[0]
-
-        global_para = global_model.state_dict()
-
-        logger.info("Initializing Personalized BN layer")
-        personalized_bn_list = init_personalized_parameters(args)
-
-        if args.is_same_initial:
-            for net_id, net in nets.items():
-                net.load_state_dict(global_para)
-
-        for a_iter in range(args.comm_round):
-            logger.info("in comm round: %d" %a_iter)
-
-            arr = np.arange(args.n_parties)
-            np.random.shuffle(arr)
-            selected = arr[:int(args.n_parties * args.sample)]
-
-            global_para = global_model.state_dict()
-            if a_iter == 0:
-                if args.is_same_initial:
-                    for idx in selected:
-                        nets[idx].load_state_dict(global_para)
-            else:
-                for idx in selected:
-                    node_weights = personalized_bn_list[idx]
-                    nets[idx].load_state_dict(global_para)
-                    nets[idx].load_state_dict(node_weights, strict=False)
-
-            local_train_net_per_kl(nets, local_nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, a_iter, logger, device=device)
-
-            # update global model
-            total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
-            fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
-
-            if a_iter == 0:
-                for iidx in range(args.n_parties):
-                    final_state = copy.deepcopy(nets[iidx].state_dict())
-                    for ll in range(4):
-                        personalized_bn_list[iidx]["bn"+str(ll+1)+".weight"] = copy.deepcopy(final_state["bn"+str(ll+1)+".weight"])
-                        personalized_bn_list[iidx]["bn"+str(ll+1)+".bias"] = copy.deepcopy(final_state["bn"+str(ll+1)+".bias"])
-           
-            for idx in range(len(selected)):
-                if a_iter != 0:
-                    final_state = copy.deepcopy(nets[selected[idx]].state_dict())
-                    for ll in range(4):
-                        personalized_bn_list[selected[idx]]["bn"+str(ll+1)+".weight"] = copy.deepcopy(final_state["bn"+str(ll+1)+".weight"])
-                        personalized_bn_list[selected[idx]]["bn"+str(ll+1)+".bias"] = copy.deepcopy(final_state["bn"+str(ll+1)+".bias"])
-                
-                net_para = nets[selected[idx]].state_dict()               
-                if idx == 0:
-                    for key in net_para:
-                        global_para[key] = net_para[key] * fed_avg_freqs[idx]
-                else:
-                    for key in net_para:
-                        global_para[key] += net_para[key] * fed_avg_freqs[idx]
-
-            global_model.load_state_dict(global_para)
-
-            if (a_iter+1)>=test_round and (a_iter+1)%eval_step == 0: 
-                
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_two_branch(
-                personalized_bn_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
-
-                if args.log_flag:
-                    logger.info('>> Global Model Train accuracy: %f' % train_acc)
-                    logger.info('>> Global Model Test accuracy: %f' % test_acc)
-                    logger.info('>> Global Model G Test accuracy: %f' % test_g_acc)
-                    logger.info('>> Global Model P Test accuracy: %f' % test_p_acc)
-                    logger.info('>> Test avg loss: %f' %test_avg_loss)
-
-                results_dict['train_avg_loss'].append(train_avg_loss)
-                results_dict['train_avg_acc'].append(train_acc)
-                results_dict['test_avg_loss'].append(test_avg_loss)
-                results_dict['test_avg_acc'].append(test_acc*100)
-                results_dict['test_g_avg_loss'].append(test_g_avg_loss)
-                results_dict['test_g_avg_acc'].append(test_g_acc*100)
-                results_dict['test_p_avg_loss'].append(test_p_avg_loss)
-                results_dict['test_p_avg_acc'].append(test_p_acc*100)
-
-        save_path = Path("results_table/"+save_path)
-        save_path.mkdir(parents=True, exist_ok=True)
-  
-        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
-
-        if args.save_model:
-            logger.info("Saving model")
-            outfile_gmodel = os.path.join(save_path, 'gmodel_1500.tar')
-            torch.save({'epoch':args.comm_round+1, 'state':global_model.state_dict()}, outfile_gmodel)
-            for ele in range(len(personalized_bn_list)):
-                p_head = os.path.join(save_path, 'phead_1500_'+str(ele)+".tar")
-                torch.save({'epoch':args.comm_round+1, 'state':personalized_bn_list[ele]}, p_head)
-
-        json_file_opt = "results_"+accessories+".json"
-        with open(str(save_path / json_file_opt), "w") as file:
-            json.dump(results_dict, file, indent=4)
-
-    elif args.alg == 'pfedKL-abl':
-        if args.model != 'cnn-b':
-            raise NotImplementedError("pfedKL-abl uses cnn-b with BN.")
+            raise NotImplementedError("fed-co2 uses cnn-b with BN.")
         logger.info("Initializing nets")
 
         nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
@@ -1270,194 +875,6 @@ if __name__ == '__main__':
                 
                 train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_two_branch(
                 personalized_bn_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
-
-                if args.log_flag:
-                    logger.info('>> Global Model Train accuracy: %f' % train_acc)
-                    logger.info('>> Global Model Test accuracy: %f' % test_acc)
-                    logger.info('>> Global Model G Test accuracy: %f' % test_g_acc)
-                    logger.info('>> Global Model P Test accuracy: %f' % test_p_acc)
-                    logger.info('>> Test avg loss: %f' %test_avg_loss)
-
-                results_dict['train_avg_loss'].append(train_avg_loss)
-                results_dict['train_avg_acc'].append(train_acc)
-                results_dict['test_avg_loss'].append(test_avg_loss)
-                results_dict['test_avg_acc'].append(test_acc*100)
-                results_dict['test_g_avg_loss'].append(test_g_avg_loss)
-                results_dict['test_g_avg_acc'].append(test_g_acc*100)
-                results_dict['test_p_avg_loss'].append(test_p_avg_loss)
-                results_dict['test_p_avg_acc'].append(test_p_acc*100)
-
-        save_path = Path("results_table/"+save_path)
-        save_path.mkdir(parents=True, exist_ok=True)
-  
-        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
-
-        if args.save_model:
-            logger.info("Saving model")
-            outfile_gmodel = os.path.join(save_path, 'gmodel_1500.tar')
-            torch.save({'epoch':args.comm_round+1, 'state':global_model.state_dict()}, outfile_gmodel)
-            for ele in range(len(personalized_bn_list)):
-                p_head = os.path.join(save_path, 'phead_1500_'+str(ele)+".tar")
-                torch.save({'epoch':args.comm_round+1, 'state':personalized_bn_list[ele]}, p_head)
-
-        json_file_opt = "results_"+accessories+".json"
-        with open(str(save_path / json_file_opt), "w") as file:
-            json.dump(results_dict, file, indent=4)
-
-    elif args.alg == 'pfedKL-per':
-        if args.model != 'cnn-b':
-            raise NotImplementedError("pfedKL-abl uses cnn-b with BN.")
-        logger.info("Initializing nets")
-
-        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-        local_nets, _, _ = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
-        global_model = global_models[0]
-
-        global_para = global_model.state_dict()
-
-        logger.info("Initializing Personalized Head")
-        personalized_per_list = init_personalized_parameters(args)
-
-        if args.is_same_initial:
-            for net_id, net in nets.items():
-                net.load_state_dict(global_para)
-
-        for a_iter in range(args.comm_round):
-            logger.info("in comm round: %d" %a_iter)
-
-            arr = np.arange(args.n_parties)
-            np.random.shuffle(arr)
-            selected = arr[:int(args.n_parties * args.sample)]
-
-            global_para = global_model.state_dict()
-            if a_iter == 0:
-                if args.is_same_initial:
-                    for idx in selected:
-                        nets[idx].load_state_dict(global_para)
-            else:
-                for idx in selected:
-                    node_weights = personalized_per_list[idx]
-                    nets[idx].load_state_dict(global_para)
-                    nets[idx].load_state_dict(node_weights, strict=False)
-
-            local_train_net_per_2branch(nets, local_nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, a_iter, logger, device=device)
-
-            # update global model
-            total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
-            fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
-
-            if a_iter == 0:
-                for iidx in range(args.n_parties):
-                    final_state = copy.deepcopy(nets[iidx].state_dict())
-                    personalized_per_list[iidx]["fc3.weight"] = copy.deepcopy(final_state["fc3.weight"])
-                    personalized_per_list[iidx]["fc3.bias"] = copy.deepcopy(final_state["fc3.bias"])
-           
-            for idx in range(len(selected)):
-                if a_iter != 0:
-                    final_state = copy.deepcopy(nets[selected[idx]].state_dict())
-                    personalized_per_list[selected[idx]]["fc3.weight"] = copy.deepcopy(final_state["fc3.weight"])
-                    personalized_per_list[selected[idx]]["fc3.bias"] = copy.deepcopy(final_state["fc3.bias"])
-                
-                net_para = nets[selected[idx]].state_dict()               
-                if idx == 0:
-                    for key in net_para:
-                        global_para[key] = net_para[key] * fed_avg_freqs[idx]
-                else:
-                    for key in net_para:
-                        global_para[key] += net_para[key] * fed_avg_freqs[idx]
-
-            global_model.load_state_dict(global_para)
-
-            if (a_iter+1)>=test_round and (a_iter+1)%eval_step == 0: 
-                
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_two_branch(
-                personalized_per_list, global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
-
-                if args.log_flag:
-                    logger.info('>> Global Model Train accuracy: %f' % train_acc)
-                    logger.info('>> Global Model Test accuracy: %f' % test_acc)
-                    logger.info('>> Global Model G Test accuracy: %f' % test_g_acc)
-                    logger.info('>> Global Model P Test accuracy: %f' % test_p_acc)
-                    logger.info('>> Test avg loss: %f' %test_avg_loss)
-
-                results_dict['train_avg_loss'].append(train_avg_loss)
-                results_dict['train_avg_acc'].append(train_acc)
-                results_dict['test_avg_loss'].append(test_avg_loss)
-                results_dict['test_avg_acc'].append(test_acc*100)
-                results_dict['test_g_avg_loss'].append(test_g_avg_loss)
-                results_dict['test_g_avg_acc'].append(test_g_acc*100)
-                results_dict['test_p_avg_loss'].append(test_p_avg_loss)
-                results_dict['test_p_avg_acc'].append(test_p_acc*100)
-
-        save_path = Path("results_table/"+save_path)
-        save_path.mkdir(parents=True, exist_ok=True)
-  
-        accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
-
-        if args.save_model:
-            logger.info("Saving model")
-            outfile_gmodel = os.path.join(save_path, 'gmodel_1500.tar')
-            torch.save({'epoch':args.comm_round+1, 'state':global_model.state_dict()}, outfile_gmodel)
-            for ele in range(len(personalized_bn_list)):
-                p_head = os.path.join(save_path, 'phead_1500_'+str(ele)+".tar")
-                torch.save({'epoch':args.comm_round+1, 'state':personalized_bn_list[ele]}, p_head)
-
-        json_file_opt = "results_"+accessories+".json"
-        with open(str(save_path / json_file_opt), "w") as file:
-            json.dump(results_dict, file, indent=4)
-
-    elif args.alg == 'pfedKL-nake':
-        if args.model != 'cnn-b':
-            raise NotImplementedError("pfedKL-abl uses cnn-b with BN.")
-        logger.info("Initializing nets")
-
-        nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-        local_nets, _, _ = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-        global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
-        global_model = global_models[0]
-        global_para = global_model.state_dict()
-
-        if args.is_same_initial:
-            for net_id, net in nets.items():
-                net.load_state_dict(global_para)
-
-        for a_iter in range(args.comm_round):
-            logger.info("in comm round: %d" %a_iter)
-            arr = np.arange(args.n_parties)
-            np.random.shuffle(arr)
-            selected = arr[:int(args.n_parties * args.sample)]
-
-            global_para = global_model.state_dict()
-            if a_iter == 0:
-                if args.is_same_initial:
-                    for idx in selected:
-                        nets[idx].load_state_dict(global_para)
-            else:
-                for idx in selected:
-                    nets[idx].load_state_dict(global_para)
-
-            local_train_net_per_2branch(nets, local_nets, selected, args, net_dataidx_map_train, net_dataidx_map_test, a_iter, logger, device=device)
-
-            # update global model
-            total_data_points = sum([len(net_dataidx_map_train[r]) for r in selected])
-            fed_avg_freqs = [len(net_dataidx_map_train[r]) / total_data_points for r in selected]
-
-            for idx in range(len(selected)):
-                net_para = nets[selected[idx]].state_dict()               
-                if idx == 0:
-                    for key in net_para:
-                        global_para[key] = net_para[key] * fed_avg_freqs[idx]
-                else:
-                    for key in net_para:
-                        global_para[key] += net_para[key] * fed_avg_freqs[idx]
-
-            global_model.load_state_dict(global_para)
-
-            if (a_iter+1)>=test_round and (a_iter+1)%eval_step == 0: 
-                
-                train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc, test_g_avg_loss, test_g_acc, test_g_all_acc, test_p_avg_loss, test_p_acc, test_p_all_acc = compute_accuracy_two_branch_naked(
-                global_model, local_nets, args, net_dataidx_map_train, net_dataidx_map_test, device=device)
 
                 if args.log_flag:
                     logger.info('>> Global Model Train accuracy: %f' % train_acc)
@@ -1566,7 +983,7 @@ if __name__ == '__main__':
         with open(str(save_path / json_file_opt), "w") as file:
             json.dump(results_dict, file, indent=4)
 
-    elif args.alg == 'local_training':
+    elif args.alg == 'singleset':
         logger.info("Initializing nets")
         nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
         
@@ -1614,7 +1031,7 @@ if __name__ == '__main__':
     acc_std  = np.std(acc_all)
     logger.info('Test Acc = %4.2f%% +- %4.2f%%' %(acc_mean, acc_std))
 
-    if args.alg in ['pfedKL', 'pfedKL-abl', 'pfedKL-per', 'pfedKL-nake']:
+    if args.alg == 'fed-co2':
         acc_all  = np.asarray(results_dict['test_g_avg_acc'])
         logger.info("Accuracy G Record: ")
         logger.info(acc_all)
@@ -1632,7 +1049,7 @@ if __name__ == '__main__':
         logger.info("Accuracy in each client: ")
         # logger.info(results_dict['test_all_acc'])
         logger.info(test_all_acc)
-        if args.alg in ['pfedKL', 'pfedKL-abl']:
+        if args.alg == 'fed-co2':
             logger.info("G Accuracy in each client: ")
             logger.info(test_g_all_acc)
             logger.info("P Accuracy in each client: ")

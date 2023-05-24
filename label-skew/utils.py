@@ -111,79 +111,6 @@ def get_form(model):
     return tmpm, tmpv
 
 
-def get_wasserstein(m1, v1, m2, v2, mode='nosquare'):
-    w = 0
-    bl = len(m1)
-    for i in range(bl):
-        tw = 0
-        tw += (np.sum(np.square(m1[i]-m2[i])))
-        tw += (np.sum(np.square(np.sqrt(v1[i]) - np.sqrt(v2[i]))))
-        if mode == 'square':
-            w += tw
-        else:
-            w += math.sqrt(tw)
-    return w
-
-
-def get_weight_matrix1(bnmlist, bnvlist):
-    model_momentum = 0.1
-    client_num = len(bnmlist)
-    weight_m = np.zeros((client_num, client_num))
-    for i in range(client_num):
-        for j in range(client_num):
-            if i == j:
-                weight_m[i, j] = 0
-            else:
-                tmp = get_wasserstein(
-                    bnmlist[i], bnvlist[i], bnmlist[j], bnvlist[j])
-                if tmp == 0:
-                    weight_m[i, j] = 100000000000000
-                else:
-                    weight_m[i, j] = 1/tmp
-    weight_s = np.sum(weight_m, axis=1)
-    weight_s = np.repeat(weight_s, client_num).reshape(
-        (client_num, client_num))
-    weight_m = (weight_m / weight_s)*(1 - model_momentum)
-    for i in range(client_num):
-        weight_m[i, i] = model_momentum
-    return weight_m
-
-
-def set_client_weight(dataidxs_train_map, dataidxs_test_map, g_model, bn_list, device, args):
-    bnmlist1, bnvlist1 = [], []
-    n_clients = len(bn_list)
-    for net_id in range(n_clients):
-        model = copy.deepcopy(g_model)
-        model.load_state_dict(bn_list[net_id], strict=False)
-        model.eval()
-        avgmeta = metacount(get_form(model)[0])
-        dataidxs_train = dataidxs_train_map[net_id]
-        dataidxs_test = dataidxs_test_map[net_id]
-        train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, 0, net_id, args.n_parties-1, drop_last=True)
-        with torch.no_grad():
-            for data, _ in train_dl_local:
-                data = data.to(device).float()
-                fea = model.getallfea(data)
-                nl = len(data)
-                tm, tv = [], []
-                for item in fea:
-                    if len(item.shape) == 4:
-                        tm.append(torch.mean(
-                            item, dim=[0, 2, 3]).detach().to('cpu').numpy())
-                        tv.append(
-                            torch.var(item, dim=[0, 2, 3]).detach().to('cpu').numpy())
-                    else:
-                        tm.append(torch.mean(
-                            item, dim=0).detach().to('cpu').numpy())
-                        tv.append(
-                            torch.var(item, dim=0).detach().to('cpu').numpy())
-                avgmeta.update(nl, tm, tv)
-        bnmlist1.append(avgmeta.getmean())
-        bnvlist1.append(avgmeta.getvar())
-    weight_m = get_weight_matrix1(bnmlist1, bnvlist1)
-    return weight_m
-
-
 class metacount(object):
     def __init__(self, numpyform):
         super(metacount, self).__init__()
@@ -279,7 +206,6 @@ def renormalize(weights, index):
 def partition_data(dataset, datadir, partition, n_parties, beta=0.4, logdir=None):
     #np.random.seed(2020)
     #torch.manual_seed(2020)
-
     if dataset == 'cifar10':
         X_train, y_train, X_test, y_test = load_cifar10_data(datadir)
         y = np.concatenate([y_train, y_test], axis=0)
@@ -290,85 +216,7 @@ def partition_data(dataset, datadir, partition, n_parties, beta=0.4, logdir=None
     n_train = y_train.shape[0]
     n_test = y_test.shape[0]
 
-    if partition == "homo":
-        idxs_train = np.random.permutation(n_train)
-        idxs_test = np.random.permutation(n_test)
-
-        # print(idxs_test)
-
-        batch_idxs_train = np.array_split(idxs_train, n_parties)
-        batch_idxs_test = np.array_split(idxs_test, n_parties)
-        # print(batch_idxs_test)
-        
-        net_dataidx_map_train = {i: batch_idxs_train[i] for i in range(n_parties)}
-        net_dataidx_map_test = {i: batch_idxs_test[i] for i in range(n_parties)}
-        # print(net_dataidx_map_test)
-        # assert False
-
-    elif partition == "2-cluster":
-        if dataset == "cifar10":
-            num = 5
-            k = 10
-        elif dataset == "cifar100":
-            num = 50
-            k = 100
-
-        # -------------------------- #
-        # Create class index mapping #
-        # -------------------------- #
-        data_class_idx_train_part1 = {i: np.where(y_train == i)[0] for i in range(int(k/2))}
-        data_class_idx_test_part1 = {i: np.where(y_test == i)[0] for i in range(int(k/2))}
-
-        data_class_idx_train_part2 = {i: np.where(y_train == i)[0] for i in range(int(k/2), k)}
-        data_class_idx_test_part2 = {i: np.where(y_test == i)[0] for i in range(int(k/2), k)}
-
-        num_samples_train = {i: len(data_class_idx_train_part1[i]) for i in range(int(k/2))}.update({i: len(data_class_idx_train_part2[i]) for i in range(int(k/2), k)})
-        num_samples_test = {i: len(data_class_idx_test_part1[i]) for i in range(int(k/2))}.update({i: len(data_class_idx_test_part2[i]) for i in range(int(k/2), k)})
-
-        # --------- #
-        # Shuffling #
-        # --------- #
-        idxs_train_part1 = []
-        idxs_train_part2 = []
-        idxs_test_part1 = []
-        idxs_test_part2 = []
-
-        for data_idx in data_class_idx_train_part1.values():
-            idxs_train_part1.extend(data_idx)
-        for data_idx in data_class_idx_test_part1.values():
-            idxs_test_part1.extend(data_idx)
-        for data_idx in data_class_idx_train_part2.values():
-            idxs_train_part2.extend(data_idx)
-        for data_idx in data_class_idx_test_part2.values():
-            idxs_test_part2.extend(data_idx)
-
-        random.shuffle(idxs_train_part1)
-        random.shuffle(idxs_train_part2)
-        random.shuffle(idxs_test_part1)
-        random.shuffle(idxs_test_part2)
-
-        batch_idxs_train_part1 = np.array_split(idxs_train_part1, int(n_parties/2))
-        batch_idxs_test_part1 = np.array_split(idxs_test_part1, int(n_parties/2))
-        batch_idxs_train_part1 = [list(x) for x in batch_idxs_train_part1]
-        batch_idxs_test_part1 = [list(x) for x in batch_idxs_test_part1]
-
-        batch_idxs_train_part2 = np.array_split(idxs_train_part2, int(n_parties/2))
-        batch_idxs_test_part2 = np.array_split(idxs_test_part2, int(n_parties/2))
-        batch_idxs_train_part2 = [list(x) for x in batch_idxs_train_part2]
-        batch_idxs_test_part2 = [list(x) for x in batch_idxs_test_part2]
-        
-        net_dataidx_map_train = {i: batch_idxs_train_part1[i] for i in range(int(n_parties/2))}
-        net_dataidx_map_test = {i: batch_idxs_test_part1[i] for i in range(int(n_parties/2))}
-
-        net_dataidx_map_train2 = {i+int(n_parties/2): batch_idxs_train_part2[i] for i in range(int(n_parties/2))}
-        net_dataidx_map_test2 = {i+int(n_parties/2): batch_idxs_test_part2[i] for i in range(int(n_parties/2))}
-
-        net_dataidx_map_train.update(net_dataidx_map_train2)
-        net_dataidx_map_test.update(net_dataidx_map_test2)
-
-       	# print(net_dataidx_map_test.keys())
-
-    elif partition == "noniid-labeldir":
+    if partition == "noniid-labeldir":
         min_size = 0
         min_require_size = 10
         if dataset == 'cifar10':
@@ -426,84 +274,6 @@ def partition_data(dataset, datadir, partition, n_parties, beta=0.4, logdir=None
             np.random.shuffle(idx_batch_test[j])
             net_dataidx_map_train[j] = idx_batch_train[j]
             net_dataidx_map_test[j] = idx_batch_test[j]
-
-    elif partition == "iid-label100":
-        seed = 12345
-        n_fine_labels = 100
-        n_coarse_labels = 20
-        coarse_labels = \
-            np.array([
-                4, 1, 14, 8, 0, 6, 7, 7, 18, 3,
-                3, 14, 9, 18, 7, 11, 3, 9, 7, 11,
-                6, 11, 5, 10, 7, 6, 13, 15, 3, 15,
-                0, 11, 1, 10, 12, 14, 16, 9, 11, 5,
-                5, 19, 8, 8, 15, 13, 14, 17, 18, 10,
-                16, 4, 17, 4, 2, 0, 17, 4, 18, 17,
-                10, 3, 2, 12, 12, 16, 12, 1, 9, 19,
-                2, 10, 0, 1, 16, 12, 9, 13, 15, 13,
-                16, 19, 2, 4, 6, 19, 5, 5, 8, 19,
-                18, 1, 2, 15, 6, 0, 17, 8, 14, 13
-            ])
-        rng_seed = (seed if (seed is not None and seed >= 0) else int(time.time()))
-        rng = random.Random(rng_seed)
-        np.random.seed(rng_seed)
-
-        n_samples_train = y_train.shape[0]
-        n_samples_test = y_test.shape[0]
-
-        selected_indices_train = rng.sample(list(range(n_samples_train)), n_samples_train)
-        selected_indices_test = rng.sample(list(range(n_samples_test)), n_samples_test)
-
-        n_samples_by_client_train = int((n_samples_train / n_parties) // 5)
-        n_samples_by_client_test = int((n_samples_test / n_parties) // 5)
-
-        indices_by_fine_labels_train = {k: list() for k in range(n_fine_labels)}
-        indices_by_coarse_labels_train = {k: list() for k in range(n_coarse_labels)}
-
-        indices_by_fine_labels_test = {k: list() for k in range(n_fine_labels)}
-        indices_by_coarse_labels_test = {k: list() for k in range(n_coarse_labels)}
-
-        for idx in selected_indices_train:
-            fine_label = y_train[idx]
-            coarse_label = coarse_labels[fine_label]
-
-            indices_by_fine_labels_train[fine_label].append(idx)
-            indices_by_coarse_labels_train[coarse_label].append(idx)
-
-        for idx in selected_indices_test:
-            fine_label = y_test[idx]
-            coarse_label = coarse_labels[fine_label]
-
-            indices_by_fine_labels_test[fine_label].append(idx)
-            indices_by_coarse_labels_test[coarse_label].append(idx)
-
-        fine_labels_by_coarse_labels = {k: list() for k in range(n_coarse_labels)}
-
-        for fine_label, coarse_label in enumerate(coarse_labels):
-            fine_labels_by_coarse_labels[coarse_label].append(fine_label)
-
-        net_dataidx_map_train = {i: np.ndarray(0, dtype=np.int64) for i in range(n_parties)}
-        net_dataidx_map_test = {i: np.ndarray(0, dtype=np.int64) for i in range(n_parties)}
-
-        for client_idx in range(n_parties):
-            coarse_idx = client_idx // 5
-            fine_idx = fine_labels_by_coarse_labels[coarse_idx]
-            for k in range(5):
-                fine_label = fine_idx[k]
-                sample_idx = rng.sample(list(indices_by_fine_labels_train[fine_label]), n_samples_by_client_train)
-                net_dataidx_map_train[client_idx] = np.append(net_dataidx_map_train[client_idx], sample_idx)
-                for idx in sample_idx:
-                    indices_by_fine_labels_train[fine_label].remove(idx)
-
-        for client_idx in range(n_parties):
-            coarse_idx = client_idx // 5
-            fine_idx = fine_labels_by_coarse_labels[coarse_idx]
-            for k in range(5):
-                fine_label = fine_idx[k]
-                sample_idx = rng.sample(list(indices_by_fine_labels_test[fine_label]), n_samples_by_client_test)
-                net_dataidx_map_test[client_idx] = np.append(net_dataidx_map_test[client_idx], sample_idx)
-                for idx in sample_idx:
-                    indices_by_fine_labels_test[fine_label].remove(idx)
 
     elif partition == "noniid-labeldir100":
         seed = 12345
@@ -594,15 +364,10 @@ def partition_data(dataset, datadir, partition, n_parties, beta=0.4, logdir=None
     elif partition == "noniid-labeluni":
         if dataset == "cifar10":
             num = 2
+            K = 10
         elif dataset == "cifar100":
             num = 10
-        if dataset in ('celeba', 'covtype', 'a9a', 'rcv1', 'SUSY'):
-            num = 1
-            K = 2
-        elif dataset == 'cifar100':
             K = 100
-        elif dataset == 'cifar10':
-            K = 10
         else:
             assert False
             print("Choose Dataset in readme.")
@@ -726,7 +491,7 @@ def compute_accuracy(model, dataloader, get_confusion_matrix=False, device="cpu"
     return correct/float(total)
 
 
-def compute_accuracy_pfedKL(net, p_net, dataloader, device="cpu"):
+def compute_accuracy_co2(net, p_net, dataloader, device="cpu"):
     was_training = False
     if net.training:
         net.eval()
@@ -841,56 +606,6 @@ def compute_accuracy_fedRod(model, p_head, dataloader, sample_per_class, args, d
     # return correct/float(total)
 
 
-def compute_accuracy_fedproto(model, global_protos, dataloader, args, device='cpu'):
-    was_training = False
-    loss_mse = nn.MSELoss().to(device)
-    if global_protos == None:
-        return 0, 1, 0.1
-    if model.training:
-        model.eval()
-        was_training = True
-
-    if args.dataset == "cifar10":
-        class_number = 10
-    elif args.dataset == "cifar100":
-        class_number = 100
-        
-    criterion = nn.CrossEntropyLoss().to(device)
-    model.to(device)
-
-    if type(dataloader) == type([1]):
-        pass
-    else:
-        dataloader = [dataloader]
-
-    correct, total, total_loss, batch_count = 0, 0, 0, 0
-    with torch.no_grad():
-        for tmp in dataloader:
-            for batch_idx, (x, target) in enumerate(tmp):
-                x, target = x.to(device), target.to(device,dtype=torch.int64)
-
-                rep = model.produce_feature(x)
-                
-                out = float('inf') * torch.ones(target.shape[0], class_number).to(device)
-                for i, r in enumerate(rep):
-                    for j, pro in global_protos.items():
-                        out[i, j] = loss_mse(r, pro)
-
-                # test_acc += (torch.sum(torch.argmin(out, dim=1) == target)).item()
-                pred_label = torch.argmin(out, dim=1)
-                loss = criterion(out, target)
-                total_loss += loss.item()
-                batch_count += 1
-                total += x.data.size()[0]
-
-                correct += (pred_label == target.data).sum().item()
-
-    if was_training:
-        model.train()
-
-    return correct, total, total_loss/batch_count
-
-
 def compute_accuracy_loss(model, dataloader, device="cpu"):
 
     was_training = False
@@ -934,56 +649,6 @@ def compute_accuracy_loss(model, dataloader, device="cpu"):
         model.train()
 
     return correct, total, total_loss/batch_count
-
-
-def compute_accuracy_loss_hypervit(model, dataloader, num_class, device="cpu"):
-    was_training = False
-    if model.training:
-        model.eval()
-        was_training = True
-
-    true_labels_list, pred_labels_list = np.array([]), np.array([])
-    criterion = nn.CrossEntropyLoss().to(device)
-    model.to(device)
-
-    if type(dataloader) == type([1]):
-        pass
-    else:
-        dataloader = [dataloader]
-
-    correct, total, total_loss, batch_count = 0, 0, 0, 0
-    with torch.no_grad():
-        for tmp in dataloader:
-            sample_per_class = torch.zeros(num_class)
-            for batch_idx, (x, target) in enumerate(tmp):
-                x, target = x.to(device), target.to(device, dtype=torch.int64)
-                out = model(x)
-
-                # balanced softmax
-                for k in range(num_class):
-                    sample_per_class[k] = (target == k).sum()
-                out = out + torch.log(sample_per_class).to(device)
-
-                loss = criterion(out, target)
-                _, pred_label = torch.max(out.data, 1)
-
-                total_loss += loss.item()
-                batch_count += 1
-                total += x.data.size()[0]
-
-                correct += (pred_label == target.data).sum().item()
-
-                if device == "cpu":
-                    pred_labels_list = np.append(pred_labels_list, pred_label.numpy())
-                    true_labels_list = np.append(true_labels_list, target.data.numpy())
-                else:
-                    pred_labels_list = np.append(pred_labels_list, pred_label.cpu().numpy())
-                    true_labels_list = np.append(true_labels_list, target.data.cpu().numpy())
-
-    if was_training:
-        model.train()
-
-    return correct, total, total_loss / batch_count
 
 
 def compute_accuracy_local(nets, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
@@ -1084,83 +749,6 @@ def compute_accuracy_local_per(personal_qkv_list, nets, args, net_dataidx_map_tr
         return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
 
 
-def compute_accuracy_local_ft(nets, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-    epochs = args.epochs
-    print("Finetune before testing")
-    for net_id in range(args.n_parties):
-        # print("net_id: ", net_id)
-        local_model = copy.deepcopy(nets[net_id])
-        local_model.eval()
-
-        dataidxs_train = net_dataidx_map_train[net_id]
-        dataidxs_test = net_dataidx_map_test[net_id]
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        else:
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-
-        optimizer = optim.SGD([p for p in local_model.parameters() if p.requires_grad], lr=args.lr, momentum=args.rho, weight_decay=args.reg)
-        criterion = nn.CrossEntropyLoss().to(device)
-
-        cnt = 0
-        local_model.train()
-        if type(train_dl_local) == type([1]):
-            pass
-        else:
-            train_dl_local = [train_dl_local]
-
-        if args.dataset == "cifar100":
-            num_class = 100
-        elif args.dataset == "cifar10":
-            num_class = 10
-
-        for epoch in range(epochs):
-            for tmp in train_dl_local:
-                sample_per_class = torch.zeros(num_class)
-                for batch_idx, (x, target) in enumerate(tmp):
-                    x, target = x.to(device), target.to(device)
-                    optimizer.zero_grad()
-                    x.requires_grad = True
-                    target.requires_grad = False
-                    target = target.long()
-                    out = local_model(x)
-                    loss = criterion(out, target)
-                    loss.backward()
-                    optimizer.step()
-
-        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-        if args.train_acc_pre:
-            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
-        test_results[net_id]['total'] = test_total
-
-    test_total_correct = sum([val['correct'] for val in test_results.values()])
-    test_total_samples = sum([val['total'] for val in test_results.values()])
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_avg_acc = test_total_correct / test_total_samples
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-
-    if args.train_acc_pre:
-        train_total_correct = sum([val['correct'] for val in train_results.values()])
-        train_total_samples = sum([val['total'] for val in train_results.values()])
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_acc_pre = train_total_correct / train_total_samples
-
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
-
-
 def compute_accuracy_two_branch(personal_bn_list, global_model, p_nets, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
     if args.train_acc_pre:
         train_results = defaultdict(lambda: defaultdict(list))
@@ -1184,76 +772,9 @@ def compute_accuracy_two_branch(personal_bn_list, global_model, p_nets, args, ne
             noise_level = 0
             train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
     
-        test_correct, test_total, test_avg_loss = compute_accuracy_pfedKL(g_net, p_net, test_dl_local, device=device)
+        test_correct, test_total, test_avg_loss = compute_accuracy_co2(g_net, p_net, test_dl_local, device=device)
         if args.train_acc_pre:
-            train_correct, train_total, train_avg_loss = compute_accuracy_pfedKL(g_net, p_net, train_dl_local, device=device)
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['g_loss'] = train_avg_loss[1] 
-            train_results[net_id]['g_correct'] = train_correct[1]
-            train_results[net_id]['p_loss'] = train_avg_loss[2] 
-            train_results[net_id]['p_correct'] = train_correct[2]
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss[0] 
-        test_results[net_id]['correct'] = test_correct[0]
-        test_results[net_id]['g_loss'] = test_avg_loss[1] 
-        test_results[net_id]['g_correct'] = test_correct[1]
-        test_results[net_id]['p_loss'] = test_avg_loss[2] 
-        test_results[net_id]['p_correct'] = test_correct[2]
-        test_results[net_id]['total'] = test_total
-
-    test_total_correct = sum([val['correct'] for val in test_results.values()])
-    test_g_total_correct = sum([val['g_correct'] for val in test_results.values()])
-    test_p_total_correct = sum([val['p_correct'] for val in test_results.values()])
-    test_total_samples = sum([val['total'] for val in test_results.values()])
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_g_avg_loss = np.mean([val['g_loss'] for val in test_results.values()])
-    test_p_avg_loss = np.mean([val['p_loss'] for val in test_results.values()]) 
-
-    test_avg_acc = test_total_correct / test_total_samples
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-    test_g_avg_acc = test_g_total_correct / test_total_samples
-    test_g_all_acc = [val['g_correct'] / val['total'] for val in test_results.values()]
-    test_p_avg_acc = test_p_total_correct / test_total_samples
-    test_p_all_acc = [val['p_correct'] / val['total'] for val in test_results.values()]
-
-    if args.train_acc_pre:
-        train_total_correct = sum([val['correct'] for val in train_results.values()])
-        train_total_samples = sum([val['total'] for val in train_results.values()])
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_acc_pre = train_total_correct / train_total_samples
-
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
-
-
-def compute_accuracy_two_branch_naked(global_model, p_nets, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-    for net_id in range(args.n_parties):
-        g_net = copy.deepcopy(global_model)
-        g_net.eval()
-        p_net = copy.deepcopy(p_nets[net_id])
-        p_net.eval()
-
-        dataidxs_train = net_dataidx_map_train[net_id]
-        dataidxs_test = net_dataidx_map_test[net_id]
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        elif args.noise_type == 'increasing':
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
-        else:
-            noise_level = 0
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-    
-        test_correct, test_total, test_avg_loss = compute_accuracy_pfedKL(g_net, p_net, test_dl_local, device=device)
-        if args.train_acc_pre:
-            train_correct, train_total, train_avg_loss = compute_accuracy_pfedKL(g_net, p_net, train_dl_local, device=device)
+            train_correct, train_total, train_avg_loss = compute_accuracy_co2(g_net, p_net, train_dl_local, device=device)
             train_results[net_id]['loss'] = train_avg_loss 
             train_results[net_id]['correct'] = train_correct
             train_results[net_id]['g_loss'] = train_avg_loss[1] 
@@ -1349,90 +870,6 @@ def compute_accuracy_per_client_simple(global_model, args, net_dataidx_map_train
         return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
 
 
-def compute_accuracy_per_client_cluster(global_model1, global_model2, args, net_dataidx_map_train, net_dataidx_map_test, nets=None, device="cpu"):
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-    epochs = args.epochs
-    for net_id in range(args.n_parties):
-
-        if net_id < int(args.n_parties/2):
-            local_model = copy.deepcopy(global_model1)
-        else:
-            local_model = copy.deepcopy(global_model2)
-
-        dataidxs_train = net_dataidx_map_train[net_id]
-        dataidxs_test = net_dataidx_map_test[net_id]
-
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        elif args.noise_type == 'increasing':
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
-        else:
-            noise_level = 0
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-
-        # optimizer = optim.SGD([p for p in local_model.parameters() if p.requires_grad], lr=args.lr, momentum=args.rho, weight_decay=args.reg)
-        # criterion = nn.CrossEntropyLoss().to(device)
-
-        # cnt = 0
-        # local_model.train()
-        # if type(train_dl_local) == type([1]):
-        #     pass
-        # else:
-        #     train_dl_local = [train_dl_local]
-
-        # if args.dataset == "cifar100":
-        #     num_class = 100
-        # elif args.dataset == "cifar10":
-        #     num_class = 10
-
-        # for epoch in range(epochs):
-        #     for tmp in train_dl_local:
-        #         sample_per_class = torch.zeros(num_class)
-        #         for batch_idx, (x, target) in enumerate(tmp):
-        #             x, target = x.to(device), target.to(device)
-        #             optimizer.zero_grad()
-        #             x.requires_grad = True
-        #             target.requires_grad = False
-        #             target = target.long()
-        #             out = local_model(x)
-        #             loss = criterion(out, target)
-        #             loss.backward()
-        #             optimizer.step()
-
-        local_model.eval()
-        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-        if args.train_acc_pre:
-            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
-        test_results[net_id]['total'] = test_total
-
-    test_total_correct = sum([val['correct'] for val in test_results.values()])
-    test_total_samples = sum([val['total'] for val in test_results.values()])
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_avg_acc = test_total_correct / test_total_samples
-
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-
-    if args.train_acc_pre:
-        train_total_correct = sum([val['correct'] for val in train_results.values()])
-        train_total_samples = sum([val['total'] for val in train_results.values()])
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_acc_pre = train_total_correct / train_total_samples
-
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
-
-
 def compute_accuracy_per_client(hyper, nets, global_model, args, net_dataidx_map_train, net_dataidx_map_test, num_class, device="cpu"):  
     hyper.eval()
     if args.train_acc_pre:
@@ -1460,112 +897,6 @@ def compute_accuracy_per_client(hyper, nets, global_model, args, net_dataidx_map
         test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
         if args.train_acc_pre:
             train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
-        test_results[net_id]['total'] = test_total
-
-    test_total_correct = sum([val['correct'] for val in test_results.values()])
-    test_total_samples = sum([val['total'] for val in test_results.values()])
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_avg_acc = test_total_correct / test_total_samples
-
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-    if args.train_acc_pre:
-        train_total_correct = sum([val['correct'] for val in train_results.values()])
-        train_total_samples = sum([val['total'] for val in train_results.values()])
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_acc_pre = train_total_correct / train_total_samples
-
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
-
-
-def compute_accuracy_per_client_proto_cluster(hyper, nets, global_model, args, net_dataidx_map_train, net_dataidx_map_test, num_class, device="cpu"):  
-    hyper.eval()
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-
-    for net_id in range(args.n_parties):
-        node_weights = hyper(torch.tensor([net_id], dtype=torch.long).to(device), True)
-        local_model = copy.deepcopy(nets[net_id])
-        local_model.load_state_dict(node_weights, strict=False)
-        local_model.eval()
-
-        dataidxs_train = net_dataidx_map_train[net_id]
-        dataidxs_test = net_dataidx_map_test[net_id]
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        elif args.noise_type == 'increasing':
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
-        else:
-            noise_level = 0
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-
-        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-        if args.train_acc_pre:
-            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
-        test_results[net_id]['total'] = test_total
-
-    test_total_correct = sum([val['correct'] for val in test_results.values()])
-    test_total_samples = sum([val['total'] for val in test_results.values()])
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_avg_acc = test_total_correct / test_total_samples
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-    if args.train_acc_pre:
-        train_total_correct = sum([val['correct'] for val in train_results.values()])
-        train_total_samples = sum([val['total'] for val in train_results.values()])
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_acc_pre = train_total_correct / train_total_samples
-
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
-
-
-def compute_accuracy_percnn_client(hyper, global_model, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
-
-    hyper.eval()
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-
-    for net_id in range(args.n_parties):
-        dataidxs_train = net_dataidx_map_train[net_id]
-        dataidxs_test = net_dataidx_map_test[net_id]
-
-        node_weights = hyper(torch.tensor([net_id], dtype=torch.long).to(device))
-        local_model = copy.deepcopy(global_model)
-        local_model.load_state_dict(node_weights, strict=False)
-        local_model.eval()
-
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        elif args.noise_type == 'increasing':
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
-        else:
-            noise_level = 0
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-
-        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-        if args.train_acc_pre:
-            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-
             train_results[net_id]['loss'] = train_avg_loss 
             train_results[net_id]['correct'] = train_correct
             train_results[net_id]['total'] = train_total
@@ -1653,70 +984,6 @@ def compute_accuracy_personally(personal_qkv_list, global_model, args, net_datai
         return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
 
 
-def compute_accuracy_perplus_client(hyper, prototype_dict, class_id_dict, global_model, args, net_dataidx_map_train, net_dataidx_map_test, nets, round, device="cpu"):
-    
-    hyper.eval()
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-
-    for net_id in range(args.n_parties):
-        dataidxs_train = net_dataidx_map_train[net_id]
-        dataidxs_test = net_dataidx_map_test[net_id]
-
-        net_id_embedding = prototype_dict[net_id].to(device)
-        if args.partition == 'noniid-labeluni' and args.position_embedding:
-            class_id_list = class_id_dict[net_id]
-            net_id_embedding = hyper.pos_embedding(net_id_embedding, class_id_list, device)
-
-        node_weights = hyper(net_id_embedding, True)
-        local_model = copy.deepcopy(global_model)
-        local_model.load_state_dict(node_weights, strict=False)
-        local_model.eval()
-
-        if args.calibrated:
-            calibrated_model = copy.deepcopy(nets[net_id])
-            calibrated_model.eval()
-        else:
-            calibrated_model = None
-
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        else:
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
- 
-        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-        if args.train_acc_pre:
-            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-
-        if args.train_acc_pre:
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
-        test_results[net_id]['total'] = test_total
-
-    test_total_correct = sum([val['correct'] for val in test_results.values()])
-    test_total_samples = sum([val['total'] for val in test_results.values()])
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_avg_acc = test_total_correct / test_total_samples
-
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-    if args.train_acc_pre:
-        train_total_correct = sum([val['correct'] for val in train_results.values()])
-        train_total_samples = sum([val['total'] for val in train_results.values()])
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_acc_pre = train_total_correct / train_total_samples
-
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
-
-
 def compute_accuracy_perRod(personal_head_list, global_model, args, net_dataidx_map_train, net_dataidx_map_test, alpha_dict, device="cpu", hyper=None):
     if hyper != None:
         hyper.eval()
@@ -1765,111 +1032,6 @@ def compute_accuracy_perRod(personal_head_list, global_model, args, net_dataidx_
 
     test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
 
-    if args.train_acc_pre:
-        train_total_correct = sum([val['correct'] for val in train_results.values()])
-        train_total_samples = sum([val['total'] for val in train_results.values()])
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_acc_pre = train_total_correct / train_total_samples
-
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
-
-
-def compute_accuracy_perProto(nets, global_protos, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-
-    for net_id in range(args.n_parties):
-
-        local_model = copy.deepcopy(nets[net_id])
-        local_model.eval()
-
-        dataidxs_train = net_dataidx_map_train[net_id]
-        dataidxs_test = net_dataidx_map_test[net_id]
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        else:
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)          
-        
-        test_correct, test_total, test_avg_loss = compute_accuracy_fedproto(local_model, 
-            global_protos, test_dl_local, args, device=device)
-        
-        if args.train_acc_pre:
-            train_correct, train_total, train_avg_loss = compute_accuracy_fedproto(local_model, 
-            global_protos, train_dl_local, args, device=device)
-
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
-        test_results[net_id]['total'] = test_total
-
-    test_total_correct = sum([val['correct'] for val in test_results.values()])
-    test_total_samples = sum([val['total'] for val in test_results.values()])
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_avg_acc = test_total_correct / test_total_samples
-
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-
-    if args.train_acc_pre:
-        train_total_correct = sum([val['correct'] for val in train_results.values()])
-        train_total_samples = sum([val['total'] for val in train_results.values()])
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_acc_pre = train_total_correct / train_total_samples
-
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
-
-
-def compute_accuracy_hphead_client(hyper, personal_qkv_list, global_model, args, net_dataidx_map_train, net_dataidx_map_test, device="cpu"):
-    hyper.eval()
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-
-    for net_id in range(args.n_parties):
-        dataidxs_train = net_dataidx_map_train[net_id]
-        dataidxs_test = net_dataidx_map_test[net_id]
-
-        node_weights = hyper(torch.tensor([net_id], dtype=torch.long).to(device), True)
-        p_head = personal_qkv_list[net_id]
-        local_model = copy.deepcopy(global_model)
-        local_model.load_state_dict(node_weights, strict=False)
-        local_model.load_state_dict(p_head, strict=False)
-        local_model.eval()
-
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        else:
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-
-        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, test_dl_local, device=device)
-        if args.train_acc_pre:
-            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
-        test_results[net_id]['total'] = test_total
-
-    test_total_correct = sum([val['correct'] for val in test_results.values()])
-    test_total_samples = sum([val['total'] for val in test_results.values()])
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_avg_acc = test_total_correct / test_total_samples
-
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
     if args.train_acc_pre:
         train_total_correct = sum([val['correct'] for val in train_results.values()])
         train_total_samples = sum([val['total'] for val in train_results.values()])
@@ -2086,136 +1248,4 @@ def noise_sample(choice, n_dis_c, dis_c_dim, n_con_c, n_z, batch_size, device):
         noise = torch.cat((noise, con_c), dim=1)
 
     return noise, idx
-
-
-def compute_accuracy_global(nets, args, net_dataidx_map_train, net_dataidx_map_test, global_test_data, device="cpu"):
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-    for net_id in range(args.n_parties):
-        # print("net_id: ", net_id)
-        local_model = copy.deepcopy(nets[net_id])
-        local_model.eval()
-
-        test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, global_test_data, device=device)
-        if args.train_acc_pre:
-            dataidxs_train = net_dataidx_map_train[net_id]
-            dataidxs_test = net_dataidx_map_test[net_id]
-            noise_level = 0
-            train_dl_local, _, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-            train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-        
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
-        test_results[net_id]['total'] = test_total
-
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-    test_avg_acc = np.mean(test_all_acc)
-
-    if args.train_acc_pre:
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        train_acc_pre = np.mean(train_all_acc)
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
-
-
-def compute_accuracy_global_two_branch(personal_bn_list, global_model, p_nets, args, net_dataidx_map_train, net_dataidx_map_test, global_test_data, device="cpu"):
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-    for net_id in range(args.n_parties):
-        node_weights = personal_bn_list[net_id]
-        g_net = copy.deepcopy(global_model)
-        g_net.load_state_dict(node_weights, strict=False)
-        g_net.eval()
-        p_net = copy.deepcopy(p_nets[net_id])
-        p_net.eval()
-
-        test_correct, test_total, test_avg_loss = compute_accuracy_pfedKL(g_net, p_net, global_test_data, device=device)
-        if args.train_acc_pre:
-            noise_level = 0
-            dataidxs_train = net_dataidx_map_train[net_id]
-            dataidxs_test = net_dataidx_map_test[net_id]
-            train_dl_local, _, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-            train_correct, train_total, train_avg_loss = compute_accuracy_pfedKL(g_net, p_net, train_dl_local, device=device)
-            train_results[net_id]['loss'] = train_avg_loss 
-            train_results[net_id]['correct'] = train_correct
-            train_results[net_id]['g_loss'] = train_avg_loss[1] 
-            train_results[net_id]['g_correct'] = train_correct[1]
-            train_results[net_id]['p_loss'] = train_avg_loss[2] 
-            train_results[net_id]['p_correct'] = train_correct[2]
-            train_results[net_id]['total'] = train_total
-
-        test_results[net_id]['loss'] = test_avg_loss[0] 
-        test_results[net_id]['correct'] = test_correct[0]
-        test_results[net_id]['g_loss'] = test_avg_loss[1] 
-        test_results[net_id]['g_correct'] = test_correct[1]
-        test_results[net_id]['p_loss'] = test_avg_loss[2] 
-        test_results[net_id]['p_correct'] = test_correct[2]
-        test_results[net_id]['total'] = test_total
-
-    test_avg_loss = np.mean([val['loss'] for val in test_results.values()])
-    test_g_avg_loss = np.mean([val['g_loss'] for val in test_results.values()])
-    test_p_avg_loss = np.mean([val['p_loss'] for val in test_results.values()]) 
-
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-    test_avg_acc = np.mean(test_all_acc)
-
-    test_g_all_acc = [val['g_correct'] / val['total'] for val in test_results.values()]
-    test_g_avg_acc = np.mean(test_g_all_acc)
-
-    test_p_all_acc = [val['p_correct'] / val['total'] for val in test_results.values()]
-    test_p_avg_acc = np.mean(test_p_all_acc)
-
-    if args.train_acc_pre:
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        train_acc_pre = np.mean(train_all_acc)
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc, test_g_avg_loss, test_g_avg_acc, test_g_all_acc, test_p_avg_loss, test_p_avg_acc, test_p_all_acc
-
-
-def compute_accuracy_global_per_client_simple(global_model, args, net_dataidx_map_train, net_dataidx_map_test, global_test_data, device="cpu"):
-    if args.train_acc_pre:
-        train_results = defaultdict(lambda: defaultdict(list))
-    test_results = defaultdict(lambda: defaultdict(list))
-    local_model = copy.deepcopy(global_model)
-    local_model.eval()
-
-    test_correct, test_total, test_avg_loss = compute_accuracy_loss(local_model, global_test_data, device=device)
-    if args.train_acc_pre:
-        for net_id in range(args.n_parties):
-            local_model = copy.deepcopy(global_model)
-            local_model.eval()
-        dataidxs_train = net_dataidx_map_train[net_id]
-        dataidxs_test = net_dataidx_map_test[net_id]
-        noise_level = 0
-        train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-        train_correct, train_total, train_avg_loss = compute_accuracy_loss(local_model, train_dl_local, device=device)
-        train_results[net_id]['loss'] = train_avg_loss 
-        train_results[net_id]['correct'] = train_correct
-        train_results[net_id]['total'] = train_total
-
-    for net_id in range(args.n_parties):
-        test_results[net_id]['loss'] = test_avg_loss 
-        test_results[net_id]['correct'] = test_correct
-        test_results[net_id]['total'] = test_total
-    test_avg_acc = test_correct / test_total
-    test_all_acc = [val['correct'] / val['total'] for val in test_results.values()]
-
-    if args.train_acc_pre:
-        train_avg_loss = np.mean([val['loss'] for val in train_results.values()])
-        train_all_acc = [val['correct'] / val['total'] for val in train_results.values()]
-        train_acc_pre = np.mean(train_all_acc)
-        return train_results, train_avg_loss, train_acc_pre, train_all_acc, test_results, test_avg_loss, test_avg_acc, test_all_acc
-    else:
-        return 0, 0, 0, 0, test_results, test_avg_loss, test_avg_acc, test_all_acc
 

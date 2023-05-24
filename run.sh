@@ -1,17 +1,14 @@
-python main.py  --mode peer --log --version 71 --imbalance_train
-# python main.py  --mode peer --log --version 18  --dataset  office_home  --save_path ../checkpoint/office_home
-# python main.py  --mode COPA --log --version 1  --dataset  digits  --save_path ../checkpoint/digits
-# python main.py  --mode moon --log --version 1  
+# python main.py  --mode fed-co2 --log  --dataset  digits  --save_path checkpoint/digits --imbalance_train --beta 0.3 --min_img_num 2 --divide 3
+# python main.py  --mode fed-co2 --log  --dataset  digits  --save_path checkpoint/digits 
+# python main.py  --mode fed-co2 --log  --dataset  office --save_path checkpoint/office --imbalance_train --beta 0.3 --min_img_num 2 --divide 2
+# python main.py  --mode copa --log   --dataset  digits  --save_path checkpoint/digits
+# python main.py  --mode moon --log   
 
-# python main.py  --mode COPA --log --version 2
-# python main.py  --mode COPA --log --version 2  --dataset  office_home  --save_path ../checkpoint/office_home
-# python main.py  --mode COPA --log --version 2  --dataset  digits  --save_path ../checkpoint/digits
+# python main.py  --mode copa --log
+# python main.py  --mode copa --log  --dataset  office  --save_path checkpoint/office
+# python main.py  --mode copa --log  --dataset  digits  --save_path checkpoint/digits
 
-# python experiment.py  --mode peer --log --version 18 --iters 2
-# python experiment.py  --mode peer --log --version 18  --dataset  office_home  --save_path ../checkpoint/office_home --iters 2
-
-# salloc -N 1 -n 4 -p debug --gres=gpu:1 --exclude=sist_gpu[62],ai_gpu[34],sist_gpu[45,65,61],sist-a40-07
-
-
-# python converge.py  --mode peer --log --version 18 --iters 1
-# python converge.py  --mode fedavg --log --version 18 --iters 1
+# python main.py  --mode fed-co2 --log --save_model --iters 2
+# python main.py  --mode fed-co2 --log  --dataset  office  --save_path checkpoint/office --iters 2
+# python main.py  --mode fed-co2 --log  --dataset  office  --save_path checkpoint/office
+python main.py  --mode fed-co2 --log --save_model --iters 2 --test

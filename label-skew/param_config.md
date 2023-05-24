@@ -1,4 +1,3 @@
-PfedMe
 cifar10:
 -lbs 16 
 -num_clients 20 -sample_rate 1 -m cnn -global_rounds 2000  -k=5

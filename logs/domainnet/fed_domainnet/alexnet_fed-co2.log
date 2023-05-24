@@ -1,0 +1,48 @@
+===2023-05-24 23:19:26===
+===Setting===
+Backnone: alexnet
+    lr: 0.01
+    batch: 32
+    iters: 2
+============ Train epoch 0 ============
+ Site-Clipart   | Train Loss: 2.3576 | G_branch Loss: 2.3158 | P_branch Loss: 2.3399 | Train Acc: 0.0667 | G Acc: 0.1048 | P Acc: 0.0667 Site-Infograph | Train Loss: 2.2923 | G_branch Loss: 2.2987 | P_branch Loss: 2.2946 | Train Acc: 0.2000 | G Acc: 0.1429 | P Acc: 0.1333 Site-Painting  | Train Loss: 2.2942 | G_branch Loss: 2.3010 | P_branch Loss: 2.2926 | Train Acc: 0.1429 | G Acc: 0.1429 | P Acc: 0.1429 Site-Quickdraw | Train Loss: 2.3185 | G_branch Loss: 2.3096 | P_branch Loss: 2.3078 | Train Acc: 0.0857 | G Acc: 0.0857 | P Acc: 0.0857 Site-Real      | Train Loss: 2.2900 | G_branch Loss: 2.2998 | P_branch Loss: 2.2907 | Train Acc: 0.1429 | G Acc: 0.1429 | P Acc: 0.1905 Site-Sketch    | Train Loss: 2.2943 | G_branch Loss: 2.2989 | P_branch Loss: 2.2932 | Train Acc: 0.1143 | G Acc: 0.1143 | P Acc: 0.1143 Site-Clipart   | Val Loss: 2.3438 | G_branch Loss: 2.3110 | P_branch Loss: 2.3309 | Val Acc: 0.0762 | G Acc: 0.0762 | P Acc: 0.0762 Site-Infograph | Val Loss: 2.2886 | G_branch Loss: 2.2997 | P_branch Loss: 2.2900 | Val Acc: 0.1714 | G Acc: 0.1333 | P Acc: 0.1524 Site-Painting  | Val Loss: 2.2843 | G_branch Loss: 2.2984 | P_branch Loss: 2.2853 | Val Acc: 0.1333 | G Acc: 0.1333 | P Acc: 0.1333 Site-Quickdraw | Val Loss: 2.3280 | G_branch Loss: 2.3136 | P_branch Loss: 2.3133 | Val Acc: 0.0667 | G Acc: 0.0667 | P Acc: 0.0667 Site-Real      | Val Loss: 2.2853 | G_branch Loss: 2.2956 | P_branch Loss: 2.2902 | Val Acc: 0.1143 | G Acc: 0.1143 | P Acc: 0.0952 Site-Sketch    | Val Loss: 2.3099 | G_branch Loss: 2.3032 | P_branch Loss: 2.3046 | Val Acc: 0.0952 | G Acc: 0.0952 | P Acc: 0.0952 Best site-Clipart    | Epoch:0 | Val Acc: 0.0762
+ Best site-Infograph  | Epoch:0 | Val Acc: 0.1714
+ Best site-Painting   | Epoch:0 | Val Acc: 0.1333
+ Best site-Quickdraw  | Epoch:0 | Val Acc: 0.0667
+ Best site-Real       | Epoch:0 | Val Acc: 0.1143
+ Best site-Sketch     | Epoch:0 | Val Acc: 0.0952
+ Saving the local and server checkpoint to checkpoint/domainnet/fed_domainnet/fed-co2...
+ Test site-Clipart   | Epoch:0 | Test Acc: 0.0837 | G Acc: 0.1312 | P Acc: 0.0837 Test site-Infograph | Epoch:0 | Test Acc: 0.1157 | G Acc: 0.1309 | P Acc: 0.0928 Test site-Painting  | Epoch:0 | Test Acc: 0.1147 | G Acc: 0.1147 | P Acc: 0.1147 Test site-Quickdraw | Epoch:0 | Test Acc: 0.1000 | G Acc: 0.1000 | P Acc: 0.1000 Test site-Real      | Epoch:0 | Test Acc: 0.1101 | G Acc: 0.1101 | P Acc: 0.1323 Test site-Sketch    | Epoch:0 | Test Acc: 0.0975 | G Acc: 0.0975 | P Acc: 0.0975============ Train epoch 1 ============
+===2023-05-24 23:23:04===
+===Setting===
+Backnone: alexnet
+    lr: 0.01
+    batch: 32
+    iters: 2
+============ Train epoch 0 ============
+ Site-Clipart   | Train Loss: 2.3572 | G_branch Loss: 2.3157 | P_branch Loss: 2.3398 | Train Acc: 0.0667 | G Acc: 0.1048 | P Acc: 0.0667 Site-Infograph | Train Loss: 2.2923 | G_branch Loss: 2.2987 | P_branch Loss: 2.2947 | Train Acc: 0.1810 | G Acc: 0.1429 | P Acc: 0.1333 Site-Painting  | Train Loss: 2.2939 | G_branch Loss: 2.3010 | P_branch Loss: 2.2923 | Train Acc: 0.1429 | G Acc: 0.1429 | P Acc: 0.1429 Site-Quickdraw | Train Loss: 2.3183 | G_branch Loss: 2.3095 | P_branch Loss: 2.3078 | Train Acc: 0.0857 | G Acc: 0.0857 | P Acc: 0.0857 Site-Real      | Train Loss: 2.2899 | G_branch Loss: 2.2998 | P_branch Loss: 2.2906 | Train Acc: 0.1429 | G Acc: 0.1429 | P Acc: 0.1905 Site-Sketch    | Train Loss: 2.2941 | G_branch Loss: 2.2989 | P_branch Loss: 2.2931 | Train Acc: 0.1143 | G Acc: 0.1143 | P Acc: 0.1143 Site-Clipart   | Val Loss: 2.3432 | G_branch Loss: 2.3108 | P_branch Loss: 2.3307 | Val Acc: 0.0762 | G Acc: 0.0762 | P Acc: 0.0762 Site-Infograph | Val Loss: 2.2881 | G_branch Loss: 2.2996 | P_branch Loss: 2.2896 | Val Acc: 0.1905 | G Acc: 0.1333 | P Acc: 0.1524 Site-Painting  | Val Loss: 2.2836 | G_branch Loss: 2.2985 | P_branch Loss: 2.2846 | Val Acc: 0.1333 | G Acc: 0.1333 | P Acc: 0.1333 Site-Quickdraw | Val Loss: 2.3273 | G_branch Loss: 2.3134 | P_branch Loss: 2.3128 | Val Acc: 0.0667 | G Acc: 0.0667 | P Acc: 0.0667 Site-Real      | Val Loss: 2.2853 | G_branch Loss: 2.2955 | P_branch Loss: 2.2903 | Val Acc: 0.1143 | G Acc: 0.1143 | P Acc: 0.0952 Site-Sketch    | Val Loss: 2.3098 | G_branch Loss: 2.3032 | P_branch Loss: 2.3045 | Val Acc: 0.0952 | G Acc: 0.0952 | P Acc: 0.0952 Best site-Clipart    | Epoch:0 | Val Acc: 0.0762
+ Best site-Infograph  | Epoch:0 | Val Acc: 0.1905
+ Best site-Painting   | Epoch:0 | Val Acc: 0.1333
+ Best site-Quickdraw  | Epoch:0 | Val Acc: 0.0667
+ Best site-Real       | Epoch:0 | Val Acc: 0.1143
+ Best site-Sketch     | Epoch:0 | Val Acc: 0.0952
+ Saving the local and server checkpoint to checkpoint/domainnet/fed_domainnet/fed-co2...
+ Test site-Clipart   | Epoch:0 | Test Acc: 0.0837 | G Acc: 0.1312 | P Acc: 0.0837 Test site-Infograph | Epoch:0 | Test Acc: 0.1005 | G Acc: 0.1309 | P Acc: 0.0928 Test site-Painting  | Epoch:0 | Test Acc: 0.1147 | G Acc: 0.1147 | P Acc: 0.1147 Test site-Quickdraw | Epoch:0 | Test Acc: 0.1000 | G Acc: 0.1000 | P Acc: 0.1000 Test site-Real      | Epoch:0 | Test Acc: 0.1101 | G Acc: 0.1101 | P Acc: 0.1323 Test site-Sketch    | Epoch:0 | Test Acc: 0.0975 | G Acc: 0.0975 | P Acc: 0.0975============ Train epoch 1 ============
+ Site-Clipart   | Train Loss: 2.7325 | G_branch Loss: 2.3347 | P_branch Loss: 2.5068 | Train Acc: 0.1048 | G Acc: 0.1048 | P Acc: 0.1048 Site-Infograph | Train Loss: 2.4239 | G_branch Loss: 2.3293 | P_branch Loss: 2.3391 | Train Acc: 0.1333 | G Acc: 0.1429 | P Acc: 0.1143 Site-Painting  | Train Loss: 2.3461 | G_branch Loss: 2.3091 | P_branch Loss: 2.3148 | Train Acc: 0.1048 | G Acc: 0.1429 | P Acc: 0.1048 Site-Quickdraw | Train Loss: 2.5518 | G_branch Loss: 2.3573 | P_branch Loss: 2.4677 | Train Acc: 0.0857 | G Acc: 0.1048 | P Acc: 0.0857 Site-Real      | Train Loss: 2.3161 | G_branch Loss: 2.2827 | P_branch Loss: 2.2789 | Train Acc: 0.1429 | G Acc: 0.1429 | P Acc: 0.1429 Site-Sketch    | Train Loss: 2.3025 | G_branch Loss: 2.2748 | P_branch Loss: 2.2988 | Train Acc: 0.1619 | G Acc: 0.1143 | P Acc: 0.1619 Site-Clipart   | Val Loss: 2.7918 | G_branch Loss: 2.3392 | P_branch Loss: 2.5629 | Val Acc: 0.0762 | G Acc: 0.0762 | P Acc: 0.0762 Site-Infograph | Val Loss: 2.3499 | G_branch Loss: 2.2969 | P_branch Loss: 2.2968 | Val Acc: 0.1238 | G Acc: 0.1333 | P Acc: 0.1333 Site-Painting  | Val Loss: 2.3692 | G_branch Loss: 2.2754 | P_branch Loss: 2.3723 | Val Acc: 0.1238 | G Acc: 0.1333 | P Acc: 0.1238 Site-Quickdraw | Val Loss: 2.5792 | G_branch Loss: 2.3712 | P_branch Loss: 2.4812 | Val Acc: 0.0667 | G Acc: 0.0952 | P Acc: 0.0667 Site-Real      | Val Loss: 2.3139 | G_branch Loss: 2.2845 | P_branch Loss: 2.2755 | Val Acc: 0.1143 | G Acc: 0.1143 | P Acc: 0.1429 Site-Sketch    | Val Loss: 2.4367 | G_branch Loss: 2.3247 | P_branch Loss: 2.3826 | Val Acc: 0.1429 | G Acc: 0.0952 | P Acc: 0.1429 Test site-Clipart   | Epoch:0 | Test Acc: 0.1312 | G Acc: 0.1312 | P Acc: 0.1312 Test site-Infograph | Epoch:0 | Test Acc: 0.1339 | G Acc: 0.1309 | P Acc: 0.1324 Test site-Painting  | Epoch:0 | Test Acc: 0.1292 | G Acc: 0.1147 | P Acc: 0.1292 Test site-Quickdraw | Epoch:0 | Test Acc: 0.1000 | G Acc: 0.1000 | P Acc: 0.1000 Test site-Real      | Epoch:0 | Test Acc: 0.1175 | G Acc: 0.1101 | P Acc: 0.1167 Test site-Sketch    | Epoch:0 | Test Acc: 0.1390 | G Acc: 0.0975 | P Acc: 0.1390===2023-05-25 00:37:17===
+===Setting===
+Backnone: alexnet
+    lr: 0.01
+    batch: 32
+    iters: 2
+===2023-05-25 00:38:41===
+===Setting===
+Backnone: alexnet
+    lr: 0.01
+    batch: 32
+    iters: 2
+===2023-05-25 00:40:16===
+===Setting===
+Backnone: alexnet
+    lr: 0.01
+    batch: 32
+    iters: 2
