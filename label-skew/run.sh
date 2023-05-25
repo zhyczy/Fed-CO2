@@ -9,7 +9,6 @@ python experiments.py --model=cnn-b \
   --comm_round=3\
   --eval_step=1 \
   --rho=0.9 \
-  --version=1 \
   --partition=noniid-labeldir100\
   --beta=0.3\
   --device='cuda:0'\

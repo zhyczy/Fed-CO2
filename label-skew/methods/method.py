@@ -17,22 +17,6 @@ import random
 from utils import *
 
 
-def agg_func(protos):
-    """
-    Returns the average of the weights.
-    """
-    for [label, proto_list] in protos.items():
-        if len(proto_list) > 1:
-            proto = 0 * proto_list[0].data
-            for i in proto_list:
-                proto += i.data
-            protos[label] = proto / len(proto_list)
-        else:
-            protos[label] = proto_list[0]
-
-    return protos
-
-
 def train_net(net_id, net, train_dataloader, test_dataloader, epochs, lr, args_optimizer, args, device="cpu", global_net=None, fedprox=False):
     if args_optimizer == 'adam':
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, weight_decay=args.reg)
@@ -74,7 +58,6 @@ def train_net(net_id, net, train_dataloader, test_dataloader, epochs, lr, args_o
                 out = net(x)
                 loss = criterion(out, target)
 
-                # fedprox
                 if fedprox:
                     fed_prox_reg = 0.0
                     for param_index, param in enumerate(net.parameters()):
@@ -88,7 +71,7 @@ def train_net(net_id, net, train_dataloader, test_dataloader, epochs, lr, args_o
                 epoch_loss_collector.append(loss.item())
 
         if len(epoch_loss_collector) == 0:
-            assert args.model in ["mobilent", 'cnn-b']
+            assert args.model == 'cnn-b'
             epoch_loss = 0
         else:
             epoch_loss = sum(epoch_loss_collector) / len(epoch_loss_collector)
@@ -225,28 +208,13 @@ def local_train_net(nets, selected, args, net_dataidx_map_train, net_dataidx_map
             logger.info("Training network %s. n_training: %d" % (str(net_id), len(dataidxs_train)))
         net.to(device)
 
-        noise_level = args.noise
-        if net_id == args.n_parties - 1:
-            noise_level = 0
-
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        else:
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
-
+        train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test)
         n_epoch = args.epochs
         trainacc, testacc = train_net(net_id, net, train_dl_local, test_dl_local, n_epoch, args.lr, args.optimizer, args, device=device)
         logger.info("net %d final test acc %f" % (net_id, testacc))
         avg_acc += testacc
-        # saving the trained models here
-        # save_model(net, net_id, args)
-        # else:
-        #     load_model(net, net_id, device=device)
+        
     avg_acc /= len(selected)
-    # if args.alg == 'local_training':
-    #     logger.info("avg test acc %f" % avg_acc)
-
     nets_list = list(nets.values())
     return nets_list
 
@@ -257,40 +225,17 @@ def local_train_net_per(nets, selected, args, net_dataidx_map_train, net_dataidx
     for net_id, net in nets.items():
         if net_id not in selected:
             continue
-        # if args.log_flag:
-        #     logger.info("Training network %s. n_training: %d" % (str(net_id), len(dataidxs_train)))
-        # print("Training network %s. n_training: %d" % (str(net_id), len(dataidxs_train)))
-        # move the model to cuda device:
+
         net.to(device)
         dataidxs_train = net_dataidx_map_train[net_id]
         dataidxs_test = net_dataidx_map_test[net_id]
-        noise_level = args.noise
-        if net_id == args.n_parties - 1:
-            noise_level = 0
-
-        if args.model in ['mobilent', 'cnn-b']:
-            if args.noise_type == 'space':
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1, drop_last=True)
-            elif args.noise_type == 'increasing':
-                noise_level = args.noise / (args.n_parties - 1) * net_id
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True, apply_noise=True)
-            else:
-                noise_level = 0
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True)
-    
+        if args.model == 'cnn-b':
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, drop_last=True)
         else:
-            if args.noise_type == 'space':
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-            elif args.noise_type == 'increasing':
-                noise_level = args.noise / (args.n_parties - 1) * net_id
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, apply_noise=True)
-            else:
-                noise_level = 0
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test)
         
         trainacc, testacc = train_net(net_id, net, train_dl_local, test_dl_local, n_epoch, 
             args.lr, args.optimizer, args, device=device)
-    
         logger.info("net %d final test acc %f" % (net_id, testacc))
         avg_acc += testacc
 
@@ -313,20 +258,7 @@ def local_train_net_per_2branch(nets, p_nets, selected, args, net_dataidx_map_tr
 
         dataidxs_train = net_dataidx_map_train[net_id]
         dataidxs_test = net_dataidx_map_test[net_id]
-        noise_level = args.noise
-        if net_id == args.n_parties - 1:
-            noise_level = 0
-
-        if args.model in ['mobilent', 'cnn-b']:
-            if args.noise_type == 'space':
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1, drop_last=True)
-            elif args.noise_type == 'increasing':
-                noise_level = args.noise / (args.n_parties - 1) * net_id
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True, apply_noise=True)
-            else:
-                noise_level = 0
-                train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True)
-
+        train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, drop_last=True)
         _, testacc = train_net_2branch(net_id, net, p_net, train_dl_local, test_dl_local, n_epoch, 
         args.lr, args.optimizer, args, device=device)   
         logger.info("net %d final test acc %f" % (net_id, testacc))
@@ -345,17 +277,10 @@ def local_train_net_fedprox(nets, selected, global_model, args, net_dataidx_map_
         dataidxs_train = net_dataidx_map_train[net_id]
         dataidxs_test = net_dataidx_map_test[net_id]
         noise_level = args.noise
-        if net_id == args.n_parties - 1:
-            noise_level = 0
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        else:
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+        train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test)
         
         trainacc, testacc = train_net(net_id, net, train_dl_local, test_dl_local, 
         n_epoch, args.lr, args.optimizer, args, device=device, global_net=global_model, fedprox=True)
-        
         logger.info("net %d final test acc %f" % (net_id, testacc))
         avg_acc += testacc
     avg_acc /= len(selected)
@@ -380,19 +305,10 @@ def local_train_net_fedRod(nets, selected, p_head, args, net_dataidx_map_train, 
         sample_per_class = alpha[net_id]
         dataidxs_train = net_dataidx_map_train[net_id]
         dataidxs_test = net_dataidx_map_test[net_id]
-        noise_level = args.noise
-        if net_id == args.n_parties - 1:
-            noise_level = 0
-    
-        if args.noise_type == 'space':
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level, net_id, args.n_parties-1)
-        else:
-            noise_level = args.noise / (args.n_parties - 1) * net_id
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+        train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test)
 
         trainacc, testacc = train_net_fedRod(net_id, net, personal_head, sample_per_class,
         train_dl_local, test_dl_local, n_epoch, args.lr, args.optimizer, args, device=device)
-        
         logger.info("net %d final test acc %f" % (net_id, testacc))
         avg_acc += testacc
     avg_acc /= len(selected)
@@ -407,18 +323,16 @@ def local_train_net_moon(nets, args, net_dataidx_map_train, net_dataidx_map_test
         dataidxs_train = net_dataidx_map_train[net_id]
         dataidxs_test = net_dataidx_map_test[net_id]
         noise_level = 0
-        if args.model in ['mobilent', 'cnn-b']:
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, noise_level, drop_last=True)
+        if args.model == 'cnn-b':
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 2*args.batch_size, dataidxs_train, dataidxs_test, drop_last=True)
         else:
-            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test, noise_level)
+            train_dl_local, test_dl_local, _, _ = get_divided_dataloader(args.dataset, args.datadir, args.batch_size, 32, dataidxs_train, dataidxs_test)
         n_epoch = args.epochs
 
         prev_model = prev_model_pool[net_id].to(device)
         trainacc, testacc = train_net_fedcon(net_id, net, global_model, prev_model, train_dl_local, test_dl_local, n_epoch, args.lr,
                                               args.optimizer, args.mu, args.temperature, args, device=device)
-
         logger.info("net %d final test acc %f" % (net_id, testacc))
-
     return nets
 
 
@@ -483,8 +397,6 @@ def train_net_fedcon(net_id, net, global_net, previous_net, train_dataloader, te
         epoch_loss = sum(epoch_loss_collector) / len(epoch_loss_collector)
         epoch_loss1 = sum(epoch_loss1_collector) / len(epoch_loss1_collector)
         epoch_loss2 = sum(epoch_loss2_collector) / len(epoch_loss2_collector)
-        # logger.info('Epoch: %d Loss: %f Loss1: %f Loss2: %f' % (epoch, epoch_loss, epoch_loss1, epoch_loss2))
-
     test_acc  = compute_accuracy(net, test_dataloader, device=device)
     if args.train_acc_pre:
         train_acc = compute_accuracy(net, train_dataloader, device=device)

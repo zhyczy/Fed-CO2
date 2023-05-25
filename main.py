@@ -312,7 +312,7 @@ if __name__ == '__main__':
                 if best_changed:     
                     print(' Saving the local and server checkpoint to {}...'.format(SAVE_PATH))
                     logfile.write(' Saving the local and server checkpoint to {}...\n'.format(SAVE_PATH))
-                    if args.mode in ['fedbn', 'local', 'copa']:
+                    if args.mode in ['fedbn', 'singleset', 'copa']:
                         if args.save_model:
                             if args.dataset == 'domainnet':
                                 torch.save({
@@ -438,7 +438,7 @@ if __name__ == '__main__':
 
             else:
                 if a_iter<=15 or (a_iter+1)%50==0:
-                    if args.mode in ['fedbn', 'local', 'copa']:
+                    if args.mode in ['fedbn', 'singleset', 'copa']:
                         for client_idx, datasite in enumerate(datasets):
                             _, test_acc = test(client_idx, models[client_idx], None, extra_modules, test_loaders[client_idx], loss_fun, device, args)
                             print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}'.format(datasite, a_iter, test_acc))
@@ -469,7 +469,7 @@ if __name__ == '__main__':
 
             if a_iter == args.iters-1:
                 if args.dataset != 'digits' and args.imbalance_train == False:
-                    if args.mode in ['fedbn', 'local', 'copa']:
+                    if args.mode in ['fedbn', 'singleset', 'copa']:
                         for client_idx, datasite in enumerate(datasets):
                             _, test_acc = test(client_idx, models[client_idx], None, extra_modules, test_loaders[client_idx], loss_fun, device, args)
                             print(' Test site-{:<10s}| Epoch:{} | Test Acc: {:.4f}'.format(datasite, best_epoch, test_acc))
@@ -499,7 +499,7 @@ if __name__ == '__main__':
                 else:
                     print(' Saving checkpoints to {}...'.format(SAVE_PATH))
                     logfile.write(' Saving checkpoints to {}...\n'.format(SAVE_PATH))                 
-                    if args.mode in ['fedbn', 'local', 'copa']:
+                    if args.mode in ['fedbn', 'singleset', 'copa']:
                         if args.save_model:             
                             torch.save({
                                 'model_0': models[0].state_dict(),

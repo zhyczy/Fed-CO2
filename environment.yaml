@@ -1,4 +1,4 @@
-name: fed-co2
+name: fedbn
 channels:
   - defaults
 dependencies:

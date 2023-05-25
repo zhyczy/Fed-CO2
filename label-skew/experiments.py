@@ -18,18 +18,13 @@ import random
 
 import datetime
 from torch.utils.tensorboard import SummaryWriter
-
-from models.vit import ViT
-from models.Hypernetworks import ViTHyper, ProtoHyper, Layer_ViTHyper
-from models.cnn import CNNHyper, CNNTarget, CNN_B
-from models.knn_per import Mobilenet
-from models.language_transformer import Transformer
+from models.cnn import CNNTarget, CNN_B
 from utils import *
 from methods.method import *
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='vit', help='neural network used in training')
+    parser.add_argument('--model', type=str, default='cnn-b', help='neural network used in training')
     parser.add_argument('--dataset', type=str, default='cifar10', help='dataset used for training')
     parser.add_argument('--net_config', type=lambda x: list(map(int, x.split(', '))))
     parser.add_argument('--partition', type=str, default='noniid-labeldir', help='the data partitioning strategy')
@@ -59,16 +54,11 @@ def get_args():
     parser.add_argument('--train_acc_pre', action='store_true')
     parser.add_argument('--eval_step', type=int, default=5)
     parser.add_argument('--test_round', type=int, default=1300)
+    parser.add_argument('--log_flag', default=True)
     parser.add_argument("--save_model", action='store_true')
     parser.add_argument("--comment", default="_")
     parser.add_argument("--definite_selection", action='store_true')
     parser.add_argument("--show_all_accuracy", action='store_true')
-
-
-    """
-    Used for fedRod
-    """
-    parser.add_argument('--use_hyperRod', action='store_true')
 
     """
     Used for moon
@@ -76,11 +66,6 @@ def get_args():
     """
     parser.add_argument('--temperature', type=float, default=0.5, help='the temperature parameter for contrastive loss')
 
-    """
-    Used for pFedKL
-    temperature is 0.5 by default
-    """
-    parser.add_argument('--kl_epochs', type=int, default=1)
 
     args = parser.parse_args()
     return args
@@ -93,7 +78,7 @@ def init_nets(net_configs, dropout_p, n_parties, args):
 
     for net_i in range(n_parties):
         if args.model == "simple-cnn":
-            if args.dataset in ("cifar10", "cinic10", "svhn"):
+            if args.dataset in ("cifar10", "cinic10"):
                 net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=10)
             elif args.dataset in ("cifar100"):
                 net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=100)
@@ -132,15 +117,7 @@ def init_personalized_parameters(args, client_number=None):
     elif args.dataset == "cifar100":
         class_num = 100
 
-    if args.alg == 'perVit' or args.alg == 'protoVit':
-        if args.model == 'vit':
-            for nndx in range(args.n_parties):
-                kqv_dict = OrderedDict()
-                for ll in range(args.depth):
-                    kqv_dict["transformer.layers."+str(ll)+".0.fn.to_qkv.weight"]=None
-                personalized_pred_list.append(kqv_dict)
-
-    elif args.alg == 'fedRod':
+    if args.alg == 'fedrod':
         if args.model == "cnn":
             dim = 84
             for nndx in range(args.n_parties):
@@ -149,22 +126,12 @@ def init_personalized_parameters(args, client_number=None):
                 else:
                     p_class = nn.Linear(dim, class_num).to(args.device)
                 personalized_pred_list.append(p_class)
-        elif args.model in ["vit", "transformer"]:
-            dim = 128
-            for nndx in range(args.n_parties):
-                if args.use_hyperRod:
-                    p_class = nn.Linear(class_num, class_num*(dim+1)).to(args.device)
-                else:
-                    p_class = nn.Linear(dim, class_num).to(args.device)
-                personalized_pred_list.append(p_class)
 
-    elif args.alg in ['fedPer', 'pfedKL-per']:
+    elif args.alg == 'fedper':
         if args.model == 'cnn':
             dim = 84
             for nndx in range(args.n_parties):
                 para_dict = OrderedDict()
-                # w_value = torch.zeros(class_num, dim).to(args.device)
-                # b_value = torch.zeros(class_num).to(args.device)
                 para_dict["fc3.weight"] = None
                 para_dict["fc3.bias"] = None
                 personalized_pred_list.append(para_dict)
@@ -175,37 +142,14 @@ def init_personalized_parameters(args, client_number=None):
                 para_dict["fc3.weight"] = None
                 para_dict["fc3.bias"] = None
                 personalized_pred_list.append(para_dict)
-        elif args.model == 'vit':
-            dim = 128
-            for nndx in range(args.n_parties):
-                para_dict = OrderedDict()
-                # w_value = torch.zeros(class_num, dim).to(args.device)
-                # b_value = torch.zeros(class_num).to(args.device)
-                para_dict["mlp_head.1.weight"] = None
-                para_dict["mlp_head.1.bias"] = None
-                personalized_pred_list.append(para_dict)
 
-    elif args.alg in ['fedBN', 'fedAP', , 'fed-co2']:
+    elif args.alg in ['fedbn', 'fed-co2']:
         for nndx in range(args.n_parties):
             bn_dict = OrderedDict()
             for ll in range(4):
                 bn_dict["bn"+str(ll+1)+".weight"]=None
                 bn_dict["bn"+str(ll+1)+".bias"]=None
             personalized_pred_list.append(bn_dict)
-
-    elif args.alg == 'hyperVit-Rod':
-        dim = 128
-        for nndx in range(args.n_parties):
-            p_class = nn.Linear(dim, class_num).to(args.device)
-            personalized_pred_list.append(p_class)
-
-    elif args.alg == 'hyperVit-Per':
-        dim = 128
-        for nndx in range(args.n_parties):
-            para_dict = OrderedDict()
-            para_dict["mlp_head.1.weight"] = None
-            para_dict["mlp_head.1.bias"] = None
-            personalized_pred_list.append(para_dict)
 
     return personalized_pred_list
 
@@ -217,7 +161,6 @@ def get_partition_dict(dataset, partition, n_parties, init_seed=0, datadir='./da
     random.seed(seed)
     X_train, y_train, X_test, y_test, net_dataidx_map_train, traindata_cls_counts = partition_data(
         dataset, datadir, logdir, partition, n_parties, beta=beta)
-
     return net_dataidx_map_train
 
 
@@ -228,58 +171,32 @@ if __name__ == '__main__':
     logging.info("Backbone: %s" % args.model)
     logging.info("Method: %s" % args.alg)
     logging.info("Partition: %s" % args.partition)
-    logging.info("Version: %d" % args.version)
     logging.info("Beta: %f" % args.beta)
     logging.info("Sample rate: %f" % args.sample)
-    logging.info("Lambda: %f" % args.lambda_value)
     logging.info("Print Accuracy on training set: %s" % args.train_acc_pre)
     logging.info("Save model: %s" % args.save_model)
     logging.info("Total running round: %s" % args.comm_round)
     logging.info("Test round fequency: %d" % args.eval_step)
-    logging.info("Noise Type: %s" %args.noise_type)
     logging.info("Show every client's accuracy: %s" %args.show_all_accuracy)
-    if args.noise_type != 'None':
-        if args.partition != 'homo':
-            raise NotImplementedError("Noise based feature skew only supports iid partition")
-        logging.info("Max Noise: %d" %args.noise)
-    if args.model in ["vit", "transformer"]:
-        logging.info("Use Layer_embedding: %s" %args.layer_emd)
-        logging.info("Transformer depth: %d" % args.depth)
-        if args.alg == "protoVit":
-            logging.info("Beginning_round: %d" %args.beginning_round)
-            if args.beginning_round<=0:
-                raise NotImplementedError("protoVit need at least one time warm up")
-            logging.info("Update round: %d" % args.update_round)
-            logging.info("Similarity Proto: %s" % args.similarity)
-        elif args.alg in ["hyperVit", "hyperVit-Rod"]:
-            logging.info("Hyper hidden dimension: %d" % args.hyper_hid)
-            logging.info("Client embedding size: %d" %args.client_embed_size)
-            logging.info("Use balance soft-max: %s" %args.balanced_soft_max)
     if args.alg == "fedprox":
         logging.info("mu value: %f" %args.mu)
-    if args.alg == "fedRod":
-        if args.use_hyperRod:
-            logging.info("Use hyper Fed-Rod.")
-        else:
-            logging.info("Use linear Fed-Rod.")
     if args.test_round<=1:
         raise NotImplementedError("test round should be larger than 1")
-    logging.info("Knowledge Distillation epoch number: %d" %args.kl_epochs)
 
-    save_path = args.alg+"-"+args.model+"-"+str(args.n_parties)+"-"+args.dataset+"-"+args.partition+args.comment
+    save_path = args.alg+"-"+args.model+"-"+str(args.n_parties)+"-"+args.dataset+"-"+args.partition
     mkdirs(args.modeldir)
     device = torch.device(args.device)
 
     mkdirs(args.logdir)
     if args.log_file_name is None:
-        argument_path= args.alg + " " + args.model + " " + str(args.version) + '-experiment_arguments-%s.json ' % datetime.datetime.now().strftime("%Y-%m-%d-%H:%M-%S")
+        argument_path= args.alg + " " + args.model + " " + '-experiment_arguments-%s.json ' % datetime.datetime.now().strftime("%Y-%m-%d-%H:%M-%S")
     else:
         argument_path=args.log_file_name+'.json'
     with open(os.path.join(args.logdir, argument_path), 'w') as f:
         json.dump(str(args), f)
 
     if args.log_file_name is None:
-        args.log_file_name = args.model + " " + str(args.version) + '-experiment_log-%s ' % (datetime.datetime.now().strftime("%Y-%m-%d-%H:%M-%S"))
+        args.log_file_name = args.model + " " + '-experiment_log-%s ' % (datetime.datetime.now().strftime("%Y-%m-%d-%H:%M-%S"))
     log_path=args.log_file_name+'.log'
     logging.basicConfig(
         filename=os.path.join(args.logdir, log_path),
@@ -323,10 +240,6 @@ if __name__ == '__main__':
     if args.alg == 'fedavg':
         logger.info("Initializing nets")
 
-        if args.k_neighbor:
-            args.epochs = 1
-            args.batch_size = 128
-
         nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
         global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
         global_model = global_models[0]
@@ -369,8 +282,6 @@ if __name__ == '__main__':
             global_model.load_state_dict(global_para)
 
             if (round+1)>=test_round and (round+1)%eval_step == 0:
-                # train_results, train_avg_loss, train_acc, train_all_acc = compute_accuracy_per_client_simple(global_model, args, net_dataidx_map_train, test=False, device=device)
-                # test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client_simple(global_model, args, net_dataidx_map_train, device=device)  
                 train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_per_client_simple(
                 global_model, args, net_dataidx_map_train, net_dataidx_map_test, nets, device=device)
 
@@ -388,7 +299,6 @@ if __name__ == '__main__':
         save_path.mkdir(parents=True, exist_ok=True)
 
         accessories = args.alg + "-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment  
-        # print("test_all_acc: ", test_all_acc)
         if args.save_model:
             logger.info("Saving model")
             outfile_gmodel = os.path.join(save_path, 'gmodel_1500.tar')
@@ -469,8 +379,8 @@ if __name__ == '__main__':
             json.dump(results_dict, file, indent=4)
 
     elif args.alg == 'fedper':
-        if args.model not in ['cnn', 'vit', 'transformer', 'lstm']:
-            raise NotImplementedError("fedPer uses cnn as backbone")
+        if args.model != 'cnn':
+            raise NotImplementedError("fedper uses cnn as backbone")
         logger.info("Initializing nets")
 
         nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
@@ -513,22 +423,14 @@ if __name__ == '__main__':
             if round == 0:
                 for iidx in range(args.n_parties):
                     final_state = copy.deepcopy(nets[iidx].state_dict())
-                    if args.model == 'cnn':
-                        personalized_pred_list[iidx]["fc3.weight"] = copy.deepcopy(final_state["fc3.weight"])
-                        personalized_pred_list[iidx]["fc3.bias"] = copy.deepcopy(final_state["fc3.bias"])
-                    elif args.model == 'vit':
-                        personalized_pred_list[iidx]["mlp_head.1.weight"] = copy.deepcopy(final_state["mlp_head.1.weight"])
-                        personalized_pred_list[iidx]["mlp_head.1.bias"] = copy.deepcopy(final_state["mlp_head.1.bias"])
+                    personalized_pred_list[iidx]["fc3.weight"] = copy.deepcopy(final_state["fc3.weight"])
+                    personalized_pred_list[iidx]["fc3.bias"] = copy.deepcopy(final_state["fc3.bias"])
            
             for idx in range(len(selected)):
                 if round != 0:
                     final_state = copy.deepcopy(nets[selected[idx]].state_dict())
-                    if args.model == 'cnn':
-                        personalized_pred_list[selected[idx]]["fc3.weight"] = copy.deepcopy(final_state["fc3.weight"])
-                        personalized_pred_list[selected[idx]]["fc3.bias"] = copy.deepcopy(final_state["fc3.bias"])
-                    elif args.model == 'vit':
-                        personalized_pred_list[selected[idx]]["mlp_head.1.weight"] = copy.deepcopy(final_state["mlp_head.1.weight"])
-                        personalized_pred_list[selected[idx]]["mlp_head.1.bias"] = copy.deepcopy(final_state["mlp_head.1.bias"])
+                    personalized_pred_list[selected[idx]]["fc3.weight"] = copy.deepcopy(final_state["fc3.weight"])
+                    personalized_pred_list[selected[idx]]["fc3.bias"] = copy.deepcopy(final_state["fc3.bias"])
                 
                 net_para = nets[selected[idx]].state_dict()               
                 if idx == 0:
@@ -572,14 +474,13 @@ if __name__ == '__main__':
             json.dump(results_dict, file, indent=4)
 
     elif args.alg == 'fedrod':
-        if args.model not in ['cnn', 'vit', 'transformer', 'lstm']:
-            raise NotImplementedError("fedRod uses cnn as backbone")
+        if args.model != 'cnn':
+            raise NotImplementedError("fedrod uses cnn as backbone")
         logger.info("Initializing nets")
 
         nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
         global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
         global_model = global_models[0]
-
         global_para = global_model.state_dict()
 
         if args.dataset == "cifar10":
@@ -594,30 +495,12 @@ if __name__ == '__main__':
                 input_embedding[indx] = indv/sum_v
             alpha_dict[kd] = input_embedding
         
-        global_hyper =None
-
-        if args.use_hyperRod:
-            if args.model == "cnn":
-                gh_dim = 84
-            else:
-                gh_dim = 128
-            logger.info("Initializing hyper classifier")
-            global_hyper = nn.Linear(class_num, class_num*(gh_dim+1)).to(device)
-            global_hpara = global_hyper.state_dict()
-
-        else:
-            logger.info("Initializing Personalized Classification head")
-        
-        assert args.balanced_soft_max
+        logger.info("Initializing Personalized Classification head")
         personalized_pred_list = init_personalized_parameters(args)
 
         if args.is_same_initial:
             for net_id, net in nets.items():
                 net.load_state_dict(global_para)
-
-            if args.use_hyperRod:
-                for p_h in personalized_pred_list:
-                    p_h.load_state_dict(global_hpara)
 
         for round in range(args.comm_round):
             logger.info("in comm round: %d" %round)
@@ -625,11 +508,7 @@ if __name__ == '__main__':
             arr = np.arange(args.n_parties)
             np.random.shuffle(arr)
             selected = arr[:int(args.n_parties * args.sample)]
-
             global_para = global_model.state_dict()
-            if args.use_hyperRod:
-                global_hpara = global_hyper.state_dict()
-
             if round == 0:
                 if args.is_same_initial:
                     for idx in selected:
@@ -642,7 +521,7 @@ if __name__ == '__main__':
                     if args.use_hyperRod:
                         personalized_pred_list[idx].load_state_dict(global_hpara)
 
-            update_dict = local_train_net_fedRod(nets, selected, personalized_pred_list, args, 
+            update_dict = local_train_net_fedrod(nets, selected, personalized_pred_list, args, 
             net_dataidx_map_train, net_dataidx_map_test, logger, alpha=alpha_dict, device=device)
 
             # update global model
@@ -659,19 +538,7 @@ if __name__ == '__main__':
                     for key in net_para:
                         global_para[key] += net_para[key] * fed_avg_freqs[idx]
 
-                if args.use_hyperRod:
-                    hnet_para = personalized_pred_list[selected[idx]].state_dict()
-                    if idx == 0:
-                        for key in hnet_para:
-                            global_hpara[key] = hnet_para[key] * fed_avg_freqs[idx]
-                    else:
-                        for key in hnet_para:
-                            global_hpara[key] += hnet_para[key] * fed_avg_freqs[idx]
-
             global_model.load_state_dict(global_para)
-            if args.use_hyperRod:
-                global_hyper.load_state_dict(global_hpara)
-
             if (round+1)>=test_round and (round+1)%eval_step == 0:
                 train_results, train_avg_loss, train_acc, train_all_acc, test_results, test_avg_loss, test_acc, test_all_acc = compute_accuracy_perRod(
                 personalized_pred_list, global_model, args, net_dataidx_map_train, net_dataidx_map_test, alpha_dict, device=device)
@@ -689,10 +556,7 @@ if __name__ == '__main__':
         save_path = Path("results_table/"+save_path)
         save_path.mkdir(parents=True, exist_ok=True)
   
-        if args.use_hyperRod:
-            accessories = args.alg + "-hyper-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
-        else:
-            accessories = args.alg + "-linear-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
+        accessories = args.alg + "-linear-" + str(args.n_parties) + "-" + str(args.dataset) + "-" + args.partition + "-" + args.comment
 
         if args.save_model:
             logger.info("Saving model")
@@ -911,11 +775,7 @@ if __name__ == '__main__':
 
     elif args.alg == 'moon':
         logger.info("Initializing nets")
-        # nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.n_parties, args, device='cpu')
-
-        # global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 1, args, device='cpu')
         nets, local_model_meta_data, layer_type = init_nets(args.net_config, args.dropout_p, args.n_parties, args)
-
         global_models, global_model_meta_data, global_layer_type = init_nets(args.net_config, 0, 1, args)
         global_model = global_models[0].to(device)
         n_comm_rounds = args.comm_round
@@ -1023,7 +883,6 @@ if __name__ == '__main__':
         with open(str(save_path / json_file_opt), "w") as file:
             json.dump(results_dict, file, indent=4)
 
-
     acc_all  = np.asarray(results_dict['test_avg_acc'])
     logger.info("Accuracy Record: ")
     logger.info(acc_all)
@@ -1047,7 +906,6 @@ if __name__ == '__main__':
         logger.info('Test Acc = %4.2f%% +- %4.2f%%' %(acc_mean, acc_std))
     if args.show_all_accuracy:
         logger.info("Accuracy in each client: ")
-        # logger.info(results_dict['test_all_acc'])
         logger.info(test_all_acc)
         if args.alg == 'fed-co2':
             logger.info("G Accuracy in each client: ")
