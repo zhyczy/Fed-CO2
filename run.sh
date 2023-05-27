@@ -11,4 +11,7 @@
 # python main.py  --mode fed-co2 --log --save_model --iters 2
 # python main.py  --mode fed-co2 --log  --dataset  office  --save_path checkpoint/office --iters 2
 # python main.py  --mode fed-co2 --log  --dataset  office  --save_path checkpoint/office
-python main.py  --mode fed-co2 --log --save_model --iters 2 --test
+# python main.py  --mode fed-co2 --log --save_model --iters 2 --test
+
+# python main.py  --mode singleset --log --iters 2
+python main.py  --mode fed-co2 --log   --dataset  digits  --save_path checkpoint/digits --iters 2

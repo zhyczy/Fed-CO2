@@ -291,7 +291,7 @@ def local_train_net_fedprox(nets, selected, global_model, args, net_dataidx_map_
     return nets_list
 
 
-def local_train_net_fedRod(nets, selected, p_head, args, net_dataidx_map_train, net_dataidx_map_test, logger=None, device="cpu", alpha=None):
+def local_train_net_fedrod(nets, selected, p_head, args, net_dataidx_map_train, net_dataidx_map_test, logger=None, device="cpu", alpha=None):
     avg_acc = 0.0
     n_epoch = args.epochs
     for net_id, net in nets.items():

@@ -1,5 +1,5 @@
 python experiments.py --model=cnn-b \
-  --dataset=cifar100 \
+  --dataset=cifar10 \
   --alg=fed-co2 \
   --lr=0.01 \
   --batch-size=64 \
@@ -9,7 +9,7 @@ python experiments.py --model=cnn-b \
   --comm_round=3\
   --eval_step=1 \
   --rho=0.9 \
-  --partition=noniid-labeldir100\
+  --partition=noniid-labeluni\
   --beta=0.3\
   --device='cuda:0'\
   --datadir='./data/' \

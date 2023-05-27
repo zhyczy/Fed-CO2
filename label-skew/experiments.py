@@ -77,13 +77,7 @@ def init_nets(net_configs, dropout_p, n_parties, args):
     device = torch.device(args.device)
 
     for net_i in range(n_parties):
-        if args.model == "simple-cnn":
-            if args.dataset in ("cifar10", "cinic10"):
-                net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=10)
-            elif args.dataset in ("cifar100"):
-                net = SimpleCNN(input_dim=(16 * 5 * 5), hidden_dims=[120, 84], output_dim=100)
-
-        elif args.model == "cnn":
+        if args.model == "cnn":
             if args.dataset == "cifar10":
                 net = CNNTarget(n_kernels=16)
             elif args.dataset == "cifar100":
@@ -121,10 +115,7 @@ def init_personalized_parameters(args, client_number=None):
         if args.model == "cnn":
             dim = 84
             for nndx in range(args.n_parties):
-                if args.use_hyperRod:
-                    p_class = nn.Linear(class_num, class_num*(dim+1)).to(args.device)
-                else:
-                    p_class = nn.Linear(dim, class_num).to(args.device)
+                p_class = nn.Linear(dim, class_num).to(args.device)
                 personalized_pred_list.append(p_class)
 
     elif args.alg == 'fedper':
@@ -513,13 +504,9 @@ if __name__ == '__main__':
                 if args.is_same_initial:
                     for idx in selected:
                         nets[idx].load_state_dict(global_para)
-                        if args.use_hyperRod:
-                            personalized_pred_list[idx].load_state_dict(global_hpara)
             else:
                 for idx in selected:
                     nets[idx].load_state_dict(global_para)
-                    if args.use_hyperRod:
-                        personalized_pred_list[idx].load_state_dict(global_hpara)
 
             update_dict = local_train_net_fedrod(nets, selected, personalized_pred_list, args, 
             net_dataidx_map_train, net_dataidx_map_test, logger, alpha=alpha_dict, device=device)
